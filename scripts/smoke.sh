@@ -15,7 +15,14 @@ name="shellcrash-fnos-smoke-$$"
 gateway_name="$name-gateway"
 network="$name-network"
 gateway_dir="$(cd "$(dirname "$0")/../app/docker/gateway" && pwd)"
+secret=
+smoke_passed=false
 cleanup() {
+  if test "$smoke_passed" != true && docker inspect "$gateway_name" >/dev/null 2>&1; then
+    echo "Gateway container startup diagnostics (generated API secret redacted):" >&2
+    docker inspect --format '{{.State.Status}} exit={{.State.ExitCode}}' "$gateway_name" >&2 || true
+    docker logs "$gateway_name" 2>&1 | sed "s/$secret/[REDACTED]/g" | tail -100 >&2 || true
+  fi
   docker rm -f "$gateway_name" "$name" >/dev/null 2>&1 || true
   docker network rm "$network" >/dev/null 2>&1 || true
   rm -rf "$tmp"
@@ -145,4 +152,5 @@ if test "$code" != 200 || ! grep -q 'secondaryPath' "$tmp/dashboard.js"; then
 fi
 
 test -f "$tmp/data/ShellCrash/configs/.autostart"
+smoke_passed=true
 echo "ShellCrash API, fnOS identity gate, secret injection, dashboard bootstrap, and gateway assets passed smoke test"
