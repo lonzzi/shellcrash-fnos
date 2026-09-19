@@ -25,7 +25,7 @@ docker run -d --name "$name" \
   -v "$tmp/data/ShellCrash/yamls:/etc/ShellCrash/yamls" \
   -v "$tmp/data/ShellCrash/jsons:/etc/ShellCrash/jsons" \
   -v "$tmp/data/ShellCrash/configs/.autostart:/etc/s6-overlay/s6-rc.d/user/contents.d/shellcrash:ro" \
-  -v "$tmp/data/ShellCrash/configs/.autostart:/etc/s6-overlay/s6-rc.d/user/contents.d/afstart:ro" \
+  -v "$tmp/data/ShellCrash/configs/.autostart:/etc/s6-overlay/s6-rc.d/user/contents.d/afstart" \
   -e TZ=Asia/Shanghai \
   "$SHELLCRASH_IMAGE" >/dev/null
 

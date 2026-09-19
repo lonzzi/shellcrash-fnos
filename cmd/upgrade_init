@@ -20,7 +20,7 @@ if [ ! -s "$TRIM_PKGVAR/ShellCrash/configs/command.env" ]; then
     cat > "$tmp" <<'EOF'
 TMPDIR='/tmp/ShellCrash'
 BINDIR='/etc/ShellCrash'
-COMMAND='"$TMPDIR/CrashCore -d $BINDIR -f $TMPDIR/config.yaml"'
+COMMAND='"/tmp/ShellCrash/CrashCore" -d "/etc/ShellCrash" -f "/tmp/ShellCrash/config.yaml"'
 EOF
     chmod 600 "$tmp"
     mv "$tmp" "$TRIM_PKGVAR/ShellCrash/configs/command.env"

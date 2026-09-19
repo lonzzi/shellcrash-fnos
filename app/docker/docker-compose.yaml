@@ -12,7 +12,7 @@ services:
       - "${TRIM_PKGVAR}/ShellCrash/yamls:/etc/ShellCrash/yamls"
       - "${TRIM_PKGVAR}/ShellCrash/jsons:/etc/ShellCrash/jsons"
       - "${TRIM_PKGVAR}/ShellCrash/configs/.autostart:/etc/s6-overlay/s6-rc.d/user/contents.d/shellcrash:ro"
-      - "${TRIM_PKGVAR}/ShellCrash/configs/.autostart:/etc/s6-overlay/s6-rc.d/user/contents.d/afstart:ro"
+      - "${TRIM_PKGVAR}/ShellCrash/configs/.autostart:/etc/s6-overlay/s6-rc.d/user/contents.d/afstart"
     environment:
       TZ: Asia/Shanghai
     logging:

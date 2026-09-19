@@ -25,7 +25,8 @@ assert desktop["port"] == "19120"
 compose = (ROOT / "app/docker/docker-compose.yaml").read_text()
 assert "@@IMAGE@@" in compose
 assert "17890:7890/tcp" in compose and "17890:7890/udp" in compose
-assert "contents.d/shellcrash:ro" in compose and "contents.d/afstart:ro" in compose
+assert "contents.d/shellcrash:ro" in compose and "contents.d/afstart" in compose
+assert "contents.d/afstart:ro" not in compose
 assert "network_mode: host" not in compose
 assert "privileged: true" not in compose
 assert "docker.sock" not in compose
@@ -56,7 +57,7 @@ with tempfile.TemporaryDirectory() as temporary:
     assert "network_check=OFF\n" in settings.read_text()
     assert "proxies: []" in profile.read_text()
     assert "BINDIR='/etc/ShellCrash'" in command_env.read_text()
-    assert "CrashCore -d $BINDIR -f $TMPDIR/config.yaml" in command_env.read_text()
+    assert 'COMMAND=\'"/tmp/ShellCrash/CrashCore" -d "/etc/ShellCrash" -f "/tmp/ShellCrash/config.yaml"\'\n' in command_env.read_text()
     assert marker.is_file()
 
     before = {
