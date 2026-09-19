@@ -51,6 +51,7 @@ assert "sub_filter_types text/html;" in gateway
 assert "q.set('secondaryPath','/app/shellcrash-fnos')" in gateway
 assert "location.replace(u.toString())" in gateway
 assert 'if ($http_x_trim_isadmin != "true") { return 403; }' in gateway
+assert gateway.index("proxy_pass http://shellcrash:9999/;") < gateway.index("proxy_redirect default;")
 
 with tempfile.TemporaryDirectory() as temporary:
     base = pathlib.Path(temporary)
