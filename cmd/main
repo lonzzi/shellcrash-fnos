@@ -2,8 +2,10 @@
 case "${1:-}" in
   start|stop) exit 0 ;;
   status)
-    state=$(docker inspect --format '{{.State.Status}}' shellcrash-fnos 2>/dev/null) || exit 3
-    [ "$state" = 'running' ] && exit 0
-    exit 3 ;;
+    for container in shellcrash-fnos shellcrash-fnos-gateway; do
+      state=$(docker inspect --format '{{.State.Status}}' "$container" 2>/dev/null) || exit 3
+      [ "$state" = 'running' ] || exit 3
+    done
+    exit 0 ;;
   *) exit 1 ;;
 esac

@@ -4,10 +4,14 @@
       "title": "ShellCrash",
       "icon": "images/icon_{0}.png",
       "type": "iframe",
-      "protocol": "http",
-      "port": "19120",
-      "url": "/ui/",
-      "allUsers": true
+      "protocol": "",
+      "gatewayPrefix": "/app/shellcrash-fnos",
+      "gatewaySocket": "app.sock",
+      "url": "/app/shellcrash-fnos/ui/#/setup",
+      "allUsers": false,
+      "control": {
+        "accessPerm": "readonly"
+      }
     }
   }
 }

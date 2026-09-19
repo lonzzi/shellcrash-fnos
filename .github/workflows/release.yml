@@ -39,6 +39,9 @@ jobs:
     if: needs.detect.outputs.build == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      image: ${{ steps.package.outputs.image }}
+      gateway_image: ${{ steps.package.outputs.gateway_image }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -49,16 +52,17 @@ jobs:
           chmod +x "$RUNNER_TEMP/fnpack"
       - name: Validate package source
         run: python3 scripts/check.py
-      - name: Build FPK against immutable official image
+      - name: Build FPK against immutable official images
         id: package
         env:
           UPSTREAM_TAG: ${{ needs.detect.outputs.tag }}
           UPSTREAM_IMAGE_TAG: ${{ needs.detect.outputs.image_tag }}
           PACKAGE_VERSION: ${{ needs.detect.outputs.version }}
         run: python3 scripts/release.py build --tag "$UPSTREAM_TAG" --image-tag "$UPSTREAM_IMAGE_TAG" --version "$PACKAGE_VERSION" --fnpack "$RUNNER_TEMP/fnpack"
-      - name: Smoke-test dashboard and authenticated API
+      - name: Smoke-test the fnOS gateway and authenticated API
         env:
           SHELLCRASH_IMAGE: ${{ steps.package.outputs.image }}
+          GATEWAY_IMAGE: ${{ steps.package.outputs.gateway_image }}
         run: bash scripts/smoke.sh
       - uses: actions/upload-artifact@v4
         with:

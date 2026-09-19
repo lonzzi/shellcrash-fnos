@@ -3,6 +3,8 @@ services:
     image: "@@IMAGE@@"
     container_name: shellcrash-fnos
     restart: unless-stopped
+    expose:
+      - "9999/tcp"
     ports:
       - "${TRIM_SERVICE_PORT:-19120}:9999/tcp"
       - "17890:7890/tcp"
@@ -15,6 +17,23 @@ services:
       - "${TRIM_PKGVAR}/ShellCrash/configs/.autostart:/etc/s6-overlay/s6-rc.d/user/contents.d/afstart"
     environment:
       TZ: Asia/Shanghai
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  gateway:
+    image: "@@GATEWAY_IMAGE@@"
+    container_name: shellcrash-fnos-gateway
+    restart: unless-stopped
+    depends_on:
+      - shellcrash
+    entrypoint: ["/bin/sh", "/etc/shellcrash-gateway/entrypoint.sh"]
+    volumes:
+      - "${TRIM_APPDEST}:/app/target"
+      - "${TRIM_PKGETC}/api.secret:/run/secrets/shellcrash-api.secret:ro"
+      - "./gateway:/etc/shellcrash-gateway:ro"
     logging:
       driver: json-file
       options:

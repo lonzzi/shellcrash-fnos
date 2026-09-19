@@ -5,6 +5,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import tempfile
 from unittest.mock import patch
@@ -19,11 +20,18 @@ assert "appname=shellcrash-fnos\n" in manifest
 assert "service_port=19120\n" in manifest
 desktop = json.loads((ROOT / "app/ui/config").read_text())[".url"]["shellcrash-fnos.main"]
 assert desktop["type"] == "iframe"
-assert desktop["url"] == "/ui/"
-assert desktop["port"] == "19120"
+assert desktop["url"] == "/app/shellcrash-fnos/ui/#/setup"
+assert desktop["gatewayPrefix"] == "/app/shellcrash-fnos"
+assert desktop["gatewaySocket"] == "app.sock"
+assert desktop["allUsers"] is False
+assert desktop["control"]["accessPerm"] == "readonly"
+assert "os_min_version=1.1.3100\n" in manifest
 
 compose = (ROOT / "app/docker/docker-compose.yaml").read_text()
 assert "@@IMAGE@@" in compose
+assert "@@GATEWAY_IMAGE@@" in compose
+assert '"${TRIM_APPDEST}:/app/target"' in compose
+assert '"${TRIM_PKGETC}/api.secret:/run/secrets/shellcrash-api.secret:ro"' in compose
 assert "17890:7890/tcp" in compose and "17890:7890/udp" in compose
 assert "contents.d/shellcrash:ro" in compose and "contents.d/afstart" in compose
 assert "contents.d/afstart:ro" not in compose
@@ -35,6 +43,14 @@ for script in (ROOT / "cmd").iterdir():
     if script.is_file():
         subprocess.run(["bash", "-n", str(script)], check=True)
 subprocess.run(["bash", "-n", str(ROOT / "scripts/smoke.sh")], check=True)
+subprocess.run(["sh", "-n", str(ROOT / "app/docker/gateway/entrypoint.sh")], check=True)
+gateway = (ROOT / "app/docker/gateway/nginx.conf.template").read_text()
+assert "listen unix:/app/target/app.sock;" in gateway
+assert 'proxy_set_header Authorization "Bearer @@API_SECRET@@";' in gateway
+assert "sub_filter_types text/html;" in gateway
+assert "q.set('secondaryPath','/app/shellcrash-fnos')" in gateway
+assert "location.replace(u.toString())" in gateway
+assert 'if ($http_x_trim_isadmin != "true") { return 403; }' in gateway
 
 with tempfile.TemporaryDirectory() as temporary:
     base = pathlib.Path(temporary)
@@ -118,5 +134,35 @@ with tempfile.TemporaryDirectory() as temporary:
                 pass
             else:
                 raise AssertionError(f"Unsafe release tag accepted: {unsafe}")
+
+    package_root = base / "fixture"
+    package_root.mkdir()
+    for name in ("app", "cmd", "config", "wizard"):
+        shutil.copytree(ROOT / name, package_root / name)
+    for name in ("manifest", "ICON.PNG", "ICON_256.PNG", "LICENSE-UPSTREAM.txt"):
+        shutil.copy2(ROOT / name, package_root / name)
+    fake_fnpack = base / "fnpack"
+    fake_fnpack.write_text("#!/bin/sh\nprintf test > fixture.fpk\n")
+    fake_fnpack.chmod(0o755)
+    output = base / "package-github-output"
+    with patch.object(release_module, "ROOT", package_root), \
+            patch.object(
+                release_module,
+                "resolve_image",
+                side_effect=[
+                    "juewuy/shellcrash@sha256:" + "1" * 64,
+                    "nginx@sha256:" + "2" * 64,
+                ],
+            ), \
+            patch.dict(os.environ, {"GITHUB_OUTPUT": str(output)}):
+        release_module.build("1.9.4", "1.9.4release", "1.9.4.2", str(fake_fnpack))
+    built_compose = (package_root / ".build/package/app/docker/docker-compose.yaml").read_text()
+    assert "@@IMAGE@@" not in built_compose and "@@GATEWAY_IMAGE@@" not in built_compose
+    assert "juewuy/shellcrash@sha256:" + "1" * 64 in built_compose
+    assert "nginx@sha256:" + "2" * 64 in built_compose
+    assert "version=1.9.4.2\n" in (package_root / ".build/package/manifest").read_text()
+    assert (package_root / ".build/package/app/docker/gateway/entrypoint.sh").is_file()
+    assert '"gateway_image": "nginx@sha256:' in (package_root / "dist/upstream.json").read_text()
+    assert "gateway_image=nginx@sha256:" + "2" * 64 in output.read_text()
 
 print("Package source checks passed")
