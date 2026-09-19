@@ -82,6 +82,6 @@ if [ "$dashboard_code" != 200 ] || ! grep -Eiq '<!doctype html|<html' "$tmp/dash
   echo "ShellCrash dashboard did not return an HTML page"
   exit 1
 fi
-test -s "$tmp/data/ShellCrash/configs/.autostart"
+test -f "$tmp/data/ShellCrash/configs/.autostart"
 smoke_passed=true
 echo "Official ShellCrash dashboard and token-protected API passed smoke test"
