@@ -7,7 +7,6 @@ name=shellcrash-fnos-smoke
 cleanup() {
   if [ "${smoke_passed:-false}" != true ]; then
     docker logs "$name" >&2 2>/dev/null || true
-    docker inspect "$name" >&2 2>/dev/null || true
   fi
   docker rm -f "$name" >/dev/null 2>&1 || true
   rm -rf "$tmp"
@@ -30,6 +29,19 @@ docker run -d --name "$name" \
   -e TZ=Asia/Shanghai \
   "$SHELLCRASH_IMAGE" >/dev/null
 
+sleep 5
+echo "S6 services and startup configuration:"
+docker exec "$name" sh -c '
+  echo "-- enabled runlevel files"
+  ls -la /etc/s6-overlay/s6-rc.d/user/contents.d
+  echo "-- active services"
+  /command/s6-rc -a list 2>&1 || true
+  echo "-- command.env"
+  cat /etc/ShellCrash/configs/command.env 2>&1 || true
+  echo "-- processes"
+  ps 2>&1 || true
+' >&2
+
 port=$(docker port "$name" 9999/tcp | tail -n 1 | awk -F: '{print $NF}')
 [[ "$port" =~ ^[0-9]+$ ]]
 base="http://127.0.0.1:$port"
@@ -44,6 +56,12 @@ for _ in $(seq 1 36); do
 done
 if [ "$ready" != true ]; then
   echo "ShellCrash API did not become ready"
+  echo "Trying the official ShellCrash start command for diagnostics:"
+  docker exec "$name" /etc/ShellCrash/start.sh start 2>&1 || true
+  sleep 5
+  docker exec "$name" sh -c 'ps 2>&1; ls -la /run/service 2>&1' >&2 || true
+  curl --silent --show-error --max-time 5 \
+    -H "Authorization: Bearer $secret" "$base/version" || true
   exit 1
 fi
 
