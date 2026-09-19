@@ -1,0 +1,93 @@
+name: Package upstream stable release
+on:
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: 'Official stable ShellCrash release (blank = latest)'
+        type: string
+        default: ''
+      package_revision:
+        description: 'Increment to repackage the same upstream release'
+        type: string
+        default: '1'
+permissions:
+  contents: read
+concurrency:
+  group: package-release
+  cancel-in-progress: false
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.check.outputs.build }}
+      tag: ${{ steps.check.outputs.tag }}
+      image_tag: ${{ steps.check.outputs.image_tag }}
+      release_tag: ${{ steps.check.outputs.release_tag }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_TAG: ${{ inputs.upstream_tag }}
+          PACKAGE_REVISION: ${{ inputs.package_revision || '1' }}
+        run: python3 scripts/release.py detect
+  build:
+    needs: detect
+    if: needs.detect.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Download pinned fnpack
+        run: |
+          curl --fail --location --retry 3 https://static2.fnnas.com/fnpack/fnpack-1.2.3-linux-amd64 -o "$RUNNER_TEMP/fnpack"
+          echo "54b97fa7b70968c4d05c79840f5daeff508957d0bb2062fdb0376d00d9615c93  $RUNNER_TEMP/fnpack" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/fnpack"
+      - name: Validate package source
+        run: python3 scripts/check.py
+      - name: Build FPK against immutable official image
+        id: package
+        env:
+          UPSTREAM_TAG: ${{ needs.detect.outputs.tag }}
+          UPSTREAM_IMAGE_TAG: ${{ needs.detect.outputs.image_tag }}
+          PACKAGE_VERSION: ${{ needs.detect.outputs.version }}
+        run: python3 scripts/release.py build --tag "$UPSTREAM_TAG" --image-tag "$UPSTREAM_IMAGE_TAG" --version "$PACKAGE_VERSION" --fnpack "$RUNNER_TEMP/fnpack"
+      - name: Smoke-test dashboard and authenticated API
+        env:
+          SHELLCRASH_IMAGE: ${{ steps.package.outputs.image }}
+        run: bash scripts/smoke.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fpk
+          path: dist/
+          if-no-files-found: error
+  publish:
+    needs: [detect, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: fpk
+          path: dist
+      - name: Publish complete release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.detect.outputs.release_tag }}
+          PACKAGE_VERSION: ${{ needs.detect.outputs.version }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum -c SHA256SUMS
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --draft --target "$COMMIT" --title "ShellCrash $PACKAGE_VERSION for fnOS" --notes-file release-notes.md
+          fi
+          gh release upload "$RELEASE_TAG" ./*.fpk SHA256SUMS upstream.json --clobber
+          gh release edit "$RELEASE_TAG" --draft=false
