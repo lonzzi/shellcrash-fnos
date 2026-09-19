@@ -5,6 +5,10 @@ set -euo pipefail
 tmp=$(mktemp -d)
 name=shellcrash-fnos-smoke
 cleanup() {
+  if [ "${smoke_passed:-false}" != true ]; then
+    docker logs "$name" >&2 2>/dev/null || true
+    docker inspect "$name" >&2 2>/dev/null || true
+  fi
   docker rm -f "$name" >/dev/null 2>&1 || true
   rm -rf "$tmp"
 }
@@ -21,6 +25,8 @@ docker run -d --name "$name" \
   -v "$tmp/data/ShellCrash/configs:/etc/ShellCrash/configs" \
   -v "$tmp/data/ShellCrash/yamls:/etc/ShellCrash/yamls" \
   -v "$tmp/data/ShellCrash/jsons:/etc/ShellCrash/jsons" \
+  -v "$tmp/data/ShellCrash/configs/.autostart:/etc/s6-overlay/s6-rc.d/user/contents.d/shellcrash:ro" \
+  -v "$tmp/data/ShellCrash/configs/.autostart:/etc/s6-overlay/s6-rc.d/user/contents.d/afstart:ro" \
   -e TZ=Asia/Shanghai \
   "$SHELLCRASH_IMAGE" >/dev/null
 
@@ -50,4 +56,5 @@ fi
 curl --silent --show-error --fail "$base/ui/" -o "$tmp/dashboard.html"
 grep -Eiq '<!doctype html|<html' "$tmp/dashboard.html"
 test -s "$tmp/data/ShellCrash/configs/.autostart"
+smoke_passed=true
 echo "Official ShellCrash dashboard and token-protected API passed smoke test"

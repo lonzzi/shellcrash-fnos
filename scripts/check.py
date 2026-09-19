@@ -25,6 +25,7 @@ assert desktop["port"] == "19120"
 compose = (ROOT / "app/docker/docker-compose.yaml").read_text()
 assert "@@IMAGE@@" in compose
 assert "17890:7890/tcp" in compose and "17890:7890/udp" in compose
+assert "contents.d/shellcrash:ro" in compose and "contents.d/afstart:ro" in compose
 assert "network_mode: host" not in compose
 assert "privileged: true" not in compose
 assert "docker.sock" not in compose
@@ -46,17 +47,20 @@ with tempfile.TemporaryDirectory() as temporary:
     secret_file = base / "etc/api.secret"
     settings = base / "var/ShellCrash/configs/ShellCrash.cfg"
     profile = base / "var/ShellCrash/yamls/config.yaml"
+    command_env = base / "var/ShellCrash/configs/command.env"
     marker = base / "var/ShellCrash/configs/.autostart"
     secret = secret_file.read_text().strip()
     assert re.fullmatch(r"[0-9a-f]{64}", secret)
     assert secret_file.stat().st_mode & 0o777 == 0o600
     assert f"secret={secret}\n" in settings.read_text()
     assert "proxies: []" in profile.read_text()
+    assert "BINDIR='/etc/ShellCrash'" in command_env.read_text()
+    assert "CrashCore -d $BINDIR -f $TMPDIR/config.yaml" in command_env.read_text()
     assert marker.is_file()
 
     before = {
         path: path.read_bytes()
-        for path in (secret_file, settings, profile, marker)
+        for path in (secret_file, settings, profile, command_env, marker)
     }
     subprocess.run(["bash", str(ROOT / "cmd/install_init")], env=env, check=True)
     assert all(path.read_bytes() == content for path, content in before.items())

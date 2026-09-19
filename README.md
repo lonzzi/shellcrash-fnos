@@ -12,7 +12,7 @@
 4. 从桌面点击 ShellCrash 图标。Web 面板在 fnOS 的内嵌小窗口打开，默认访问 /ui/。
 5. 面板 API 使用安装时生成的随机密钥。首次打开若要求填写密钥，请从 /vol1/@appconf/shellcrash-fnos/api.secret 读取。
 
-应用会生成一个空白 Mihomo 配置，让 Web 面板启动并可连接 API。它不含任何代理节点，也不会替你导入订阅。导入自己的配置后再使用代理。需要通过 ShellCrash 菜单管理配置时，可以 SSH 到 NAS 后运行：
+应用会生成一个空白 Mihomo 配置，让 Web 面板启动并可连接 API。它不含任何代理节点，也不会替你导入订阅。导入自己的配置后再使用代理。应用会在容器启动时启用官方 S6 服务；需要通过 ShellCrash 菜单管理配置时，可以 SSH 到 NAS 后运行：
 
     docker exec -it shellcrash-fnos crash
 
@@ -34,7 +34,7 @@ Web 面板可以管理代理配置和连接，请限制 19120 与 17890 端口�
 - 自动升级工作流不会升级 NAS 上已经安装的应用。检查更新后请在 fnOS 手动安装新 FPK。
 - FPK 更新保留配置、API 密钥、订阅和启动标记；安装脚本只在新安装时生成初始文件。
 - 卸载时请在 fnOS 保留仍需使用的应用数据。
-- 默认空白配置启用面板启动；若你删除 configs/.autostart，容器重启后不会自动启动 Mihomo 面板服务。
+- `configs/.autostart` 会启用上游 S6 的 Mihomo 核心和启动后处理服务；请保留此文件以便容器重启后提供桌面 Web 面板。
 
 ## 自动打包
 
