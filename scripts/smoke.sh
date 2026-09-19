@@ -42,8 +42,9 @@ docker exec "$name" sh -c '
   ps 2>&1 || true
 ' >&2
 
-port=$(docker port "$name" 9999/tcp | tail -n 1 | awk -F: '{print $NF}')
-[[ "$port" =~ ^[0-9]+$ ]]
+port=$(docker inspect --format '{{(index (index .NetworkSettings.Ports "9999/tcp") 0).HostPort}}' "$name")
+[[ "$port" =~ ^[0-9]+$ ]] || { echo "Could not resolve published Web port: [$port]"; exit 1; }
+echo "Web/API published on 127.0.0.1:$port"
 base="http://127.0.0.1:$port"
 ready=false
 for _ in $(seq 1 36); do
@@ -64,15 +65,23 @@ if [ "$ready" != true ]; then
     -H "Authorization: Bearer $secret" "$base/version" || true
   exit 1
 fi
+echo "Authenticated /version request succeeded"
 
 code=$(curl --silent --output /dev/null --write-out '%{http_code}' "$base/version")
+echo "Unauthenticated /version returned HTTP $code"
 if [ "$code" != 401 ]; then
   echo "ShellCrash API did not reject a request without its token"
   exit 1
 fi
 
-curl --silent --show-error --fail "$base/ui/" -o "$tmp/dashboard.html"
-grep -Eiq '<!doctype html|<html' "$tmp/dashboard.html"
+dashboard_code=$(curl --silent --show-error --output "$tmp/dashboard.html" --write-out '%{http_code}' "$base/ui/")
+echo "Dashboard /ui/ returned HTTP $dashboard_code"
+if [ "$dashboard_code" != 200 ] || ! grep -Eiq '<!doctype html|<html' "$tmp/dashboard.html"; then
+  head -c 400 "$tmp/dashboard.html" >&2 || true
+  echo
+  echo "ShellCrash dashboard did not return an HTML page"
+  exit 1
+fi
 test -s "$tmp/data/ShellCrash/configs/.autostart"
 smoke_passed=true
 echo "Official ShellCrash dashboard and token-protected API passed smoke test"
