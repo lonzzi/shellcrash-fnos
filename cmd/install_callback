@@ -1,0 +1,6 @@
+#!/bin/bash
+set -eu
+[ -s "$TRIM_PKGETC/api.secret" ] || { echo 'ShellCrash API secret was not initialized' > "$TRIM_TEMP_LOGFILE"; exit 1; }
+[ -s "$TRIM_PKGVAR/ShellCrash/configs/ShellCrash.cfg" ] || { echo 'ShellCrash config was not initialized' > "$TRIM_TEMP_LOGFILE"; exit 1; }
+[ -s "$TRIM_PKGVAR/ShellCrash/yamls/config.yaml" ] || { echo 'Starter profile was not initialized' > "$TRIM_TEMP_LOGFILE"; exit 1; }
+[ -f "$TRIM_PKGVAR/ShellCrash/configs/.autostart" ] || { echo 'ShellCrash autostart marker is missing' > "$TRIM_TEMP_LOGFILE"; exit 1; }

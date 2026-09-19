@@ -1,0 +1,6 @@
+#!/bin/bash
+set -eu
+[ -s "$TRIM_PKGETC/api.secret" ] || { echo 'ShellCrash API secret is missing after upgrade.' > "$TRIM_TEMP_LOGFILE"; exit 1; }
+[ -s "$TRIM_PKGVAR/ShellCrash/configs/ShellCrash.cfg" ] || { echo 'ShellCrash settings are missing after upgrade.' > "$TRIM_TEMP_LOGFILE"; exit 1; }
+[ -d "$TRIM_PKGVAR/ShellCrash/yamls" ] || { echo 'ShellCrash profiles are missing after upgrade.' > "$TRIM_TEMP_LOGFILE"; exit 1; }
+[ -d "$TRIM_PKGVAR/ShellCrash/jsons" ] || { echo 'ShellCrash JSON profiles are missing after upgrade.' > "$TRIM_TEMP_LOGFILE"; exit 1; }

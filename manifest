@@ -1,0 +1,13 @@
+appname=shellcrash-fnos
+version=1.9.4
+display_name=ShellCrash
+desc=ShellCrash with persistent config and desktop Web UI. Community Docker package for fnOS.
+platform=all
+source=thirdparty
+maintainer=lonzzi
+distributor=lonzzi
+desktop_uidir=ui
+desktop_applaunchname=shellcrash-fnos.main
+service_port=19120
+checkport=true
+ctl_stop=true

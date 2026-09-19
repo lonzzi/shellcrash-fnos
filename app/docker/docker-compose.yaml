@@ -1,0 +1,20 @@
+services:
+  shellcrash:
+    image: "@@IMAGE@@"
+    container_name: shellcrash-fnos
+    restart: unless-stopped
+    ports:
+      - "${TRIM_SERVICE_PORT:-19120}:9999/tcp"
+      - "17890:7890/tcp"
+      - "17890:7890/udp"
+    volumes:
+      - "${TRIM_PKGVAR}/ShellCrash/configs:/etc/ShellCrash/configs"
+      - "${TRIM_PKGVAR}/ShellCrash/yamls:/etc/ShellCrash/yamls"
+      - "${TRIM_PKGVAR}/ShellCrash/jsons:/etc/ShellCrash/jsons"
+    environment:
+      TZ: Asia/Shanghai
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

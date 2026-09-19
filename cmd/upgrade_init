@@ -1,0 +1,14 @@
+#!/bin/bash
+set -eu
+
+# Stop rather than silently creating empty mounts if fnOS lost existing state.
+for path in \
+    "$TRIM_PKGETC/api.secret" \
+    "$TRIM_PKGVAR/ShellCrash/configs" \
+    "$TRIM_PKGVAR/ShellCrash/yamls" \
+    "$TRIM_PKGVAR/ShellCrash/jsons"; do
+    [ -e "$path" ] || {
+        echo "Existing ShellCrash configuration is missing: $path. Upgrade stopped to protect data." > "$TRIM_TEMP_LOGFILE"
+        exit 1
+    }
+done

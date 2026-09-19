@@ -1,0 +1,11 @@
+[
+  {
+    "stepTitle": "ShellCrash 初始设置",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "安装后从桌面图标在 fnOS 小窗口打开 Web 面板。首次启动会生成一个空白 Mihomo 配置，供面板正常启动；请导入自己的配置后再使用代理。API 密钥保存在 /vol1/@appconf/shellcrash-fnos/api.secret。默认面板端口 19120，HTTP/SOCKS 混合代理端口 17890。默认只提供容器内代理，不修改 fnOS 宿主机防火墙。"
+      }
+    ]
+  }
+]

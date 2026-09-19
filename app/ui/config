@@ -1,0 +1,13 @@
+{
+  ".url": {
+    "shellcrash-fnos.main": {
+      "title": "ShellCrash",
+      "icon": "images/icon_{0}.png",
+      "type": "iframe",
+      "protocol": "http",
+      "port": "19120",
+      "url": "/ui/",
+      "allUsers": true
+    }
+  }
+}

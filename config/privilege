@@ -1,0 +1,7 @@
+{
+  "defaults": {
+    "run-as": "root"
+  },
+  "username": "docker-shellcrash-fnos",
+  "groupname": "docker-shellcrash-fnos"
+}

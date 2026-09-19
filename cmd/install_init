@@ -1,0 +1,70 @@
+#!/bin/bash
+set -eu
+umask 077
+
+mkdir -p "$TRIM_PKGETC" "$TRIM_PKGVAR/ShellCrash/configs" "$TRIM_PKGVAR/ShellCrash/yamls" "$TRIM_PKGVAR/ShellCrash/jsons"
+
+# Only seed a fresh installation. The app data and token are never replaced
+# when fnOS reruns an install hook while updating an existing package.
+fresh_install=false
+if [ ! -e "$TRIM_PKGVAR/ShellCrash/configs/ShellCrash.cfg" ] && \
+   [ ! -e "$TRIM_PKGVAR/ShellCrash/yamls/config.yaml" ] && \
+   [ ! -e "$TRIM_PKGVAR/ShellCrash/configs/.autostart" ]; then
+    fresh_install=true
+fi
+
+if [ ! -s "$TRIM_PKGETC/api.secret" ]; then
+    secret=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
+    tmp=$(mktemp "$TRIM_PKGETC/api.secret.XXXXXX")
+    trap 'rm -f "$tmp"' EXIT
+    printf '%s\n' "$secret" > "$tmp"
+    chmod 600 "$tmp"
+    mv "$tmp" "$TRIM_PKGETC/api.secret"
+fi
+
+if [ ! -s "$TRIM_PKGVAR/ShellCrash/configs/ShellCrash.cfg" ]; then
+    secret=$(cat "$TRIM_PKGETC/api.secret")
+    tmp=$(mktemp "$TRIM_PKGVAR/ShellCrash/configs/ShellCrash.cfg.XXXXXX")
+    trap 'rm -f "$tmp"' EXIT
+    cat > "$tmp" <<EOF
+# ShellCrash fnOS defaults. Edit with care.
+secret=$secret
+mix_port=7890
+db_port=9999
+firewall_area=4
+redir_mod=纯净模式
+crashcore=meta
+userguide=1
+EOF
+    chmod 600 "$tmp"
+    mv "$tmp" "$TRIM_PKGVAR/ShellCrash/configs/ShellCrash.cfg"
+fi
+
+if [ ! -s "$TRIM_PKGVAR/ShellCrash/yamls/config.yaml" ]; then
+    tmp=$(mktemp "$TRIM_PKGVAR/ShellCrash/yamls/config.yaml.XXXXXX")
+    trap 'rm -f "$tmp"' EXIT
+    cat > "$tmp" <<'EOF'
+# Starter config only. Import your own subscription/config before proxy use.
+mixed-port: 7890
+allow-lan: true
+mode: rule
+log-level: info
+proxies: []
+proxy-groups:
+  - name: Proxy
+    type: select
+    proxies:
+      - DIRECT
+rules:
+  - MATCH,DIRECT
+EOF
+    chmod 600 "$tmp"
+    mv "$tmp" "$TRIM_PKGVAR/ShellCrash/yamls/config.yaml"
+fi
+
+# The official image starts the Mihomo dashboard at boot when this marker is
+# present. Keep it under the persistent config mount so upgrades retain it.
+if [ "$fresh_install" = true ]; then
+    touch "$TRIM_PKGVAR/ShellCrash/configs/.autostart"
+fi
+chmod 700 "$TRIM_PKGVAR/ShellCrash/configs" "$TRIM_PKGVAR/ShellCrash/yamls" "$TRIM_PKGVAR/ShellCrash/jsons"

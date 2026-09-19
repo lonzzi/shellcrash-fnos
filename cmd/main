@@ -1,0 +1,9 @@
+#!/bin/bash
+case "${1:-}" in
+  start|stop) exit 0 ;;
+  status)
+    state=$(docker inspect --format '{{.State.Status}}' shellcrash-fnos 2>/dev/null) || exit 3
+    [ "$state" = 'running' ] && exit 0
+    exit 3 ;;
+  *) exit 1 ;;
+esac

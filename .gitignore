@@ -1,0 +1,5 @@
+.build/
+dist/
+*.fpk
+__pycache__/
+.DS_Store
