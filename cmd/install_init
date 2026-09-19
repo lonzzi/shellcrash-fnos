@@ -34,6 +34,7 @@ db_port=9999
 firewall_area=4
 redir_mod=纯净模式
 crashcore=meta
+network_check=OFF
 userguide=1
 EOF
     chmod 600 "$tmp"

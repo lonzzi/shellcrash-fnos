@@ -53,6 +53,7 @@ with tempfile.TemporaryDirectory() as temporary:
     assert re.fullmatch(r"[0-9a-f]{64}", secret)
     assert secret_file.stat().st_mode & 0o777 == 0o600
     assert f"secret={secret}\n" in settings.read_text()
+    assert "network_check=OFF\n" in settings.read_text()
     assert "proxies: []" in profile.read_text()
     assert "BINDIR='/etc/ShellCrash'" in command_env.read_text()
     assert "CrashCore -d $BINDIR -f $TMPDIR/config.yaml" in command_env.read_text()

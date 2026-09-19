@@ -57,7 +57,7 @@ done
 if [ "$ready" != true ]; then
   echo "ShellCrash API did not become ready"
   echo "Trying the official ShellCrash start command for diagnostics:"
-  docker exec "$name" /etc/ShellCrash/start.sh start 2>&1 || true
+  timeout 30 docker exec "$name" /etc/ShellCrash/start.sh start 2>&1 || true
   sleep 5
   docker exec "$name" sh -c 'ps 2>&1; ls -la /run/service 2>&1' >&2 || true
   curl --silent --show-error --max-time 5 \
