@@ -127,14 +127,14 @@ code=$(curl --silent --show-error --unix-socket "$tmp/app.sock" --output "$tmp/m
 echo "Admin manager page returned HTTP $code"
 test "$code" = 200
 grep -Fq 'ShellCrash 订阅管理' "$tmp/manager.html"
+grep -Fq '../ui/#/' "$tmp/manager.html"
 
 code=$(curl --silent --show-error --unix-socket "$tmp/app.sock" --output "$tmp/dashboard.html" --write-out '%{http_code}' \
   "${headers[@]}" "$gateway/ui/")
 echo "Admin MetaCubeXD dashboard returned HTTP $code"
 test "$code" = 200
 grep -Fq 'const base="/app/shellcrash-fnos"' "$tmp/dashboard.html"
-grep -Fq "q.set('secondaryPath',base)" "$tmp/dashboard.html"
-grep -Fq "q.set('secret','fnos-gateway')" "$tmp/dashboard.html"
+grep -Fq 'config.defaultBackendURL=window.location.origin+base' "$tmp/dashboard.html"
 grep -Fq 'shellcrash-fnos-back' "$tmp/dashboard.html"
 if grep -Fq "$secret" "$tmp/dashboard.html"; then
   echo "Dashboard HTML leaked the API secret" >&2
