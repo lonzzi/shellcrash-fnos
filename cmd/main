@@ -30,7 +30,7 @@ export LISTEN_ADDR="127.0.0.1:9998"
 export GATEWAY_SOCKET="$APP_DIR/app.sock"
 export APP_PREFIX="/app/shellcrash-fnos"
 export DASHBOARD_DIR="$APP_DIR/dashboard"
-export MIXED_PORT="17890"
+export MIXED_PORT="7890"
 export MANAGER_VERSION="$(sed -n 's/^version=//p' "$APP_DIR/../manifest" 2>/dev/null | head -n 1)"
 
 process_matches() {

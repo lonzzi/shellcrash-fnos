@@ -24,8 +24,11 @@ for name in ("config/resource", "config/privilege", "app/ui/config", "wizard/ins
 
 manifest = (ROOT / "manifest").read_text(encoding="utf-8")
 assert "appname=shellcrash-fnos\n" in manifest
-assert "service_port=17890\n" in manifest
+assert "service_port=7890\n" in manifest
 assert "platform=all\n" in manifest
+port_config = (ROOT / "ShellCrash.sc").read_text(encoding="utf-8")
+assert 'src.ports="7890/tcp,7890/udp"' in port_config
+assert 'dst.ports="7890/tcp,7890/udp"' in port_config
 privilege = json.loads((ROOT / "config/privilege").read_text(encoding="utf-8"))
 assert privilege["defaults"]["run-as"] == "root"
 resource = json.loads((ROOT / "config/resource").read_text(encoding="utf-8"))
@@ -46,6 +49,7 @@ assert not (ROOT / "app/subscription-manager").exists()
 main_script = (ROOT / "cmd/main").read_text(encoding="utf-8")
 assert 'MANAGER="$APP_DIR/bin/shellcrash-manager"' in main_script
 assert 'CORE="$APP_DIR/bin/mihomo"' in main_script
+assert 'export MIXED_PORT="7890"' in main_script
 assert 'DASHBOARD_DIR="$APP_DIR/dashboard"' in main_script
 assert 'export CORE_CONTROLLER="127.0.0.1:9999"' in main_script
 assert 'restore_old_docker' in main_script and 'remove_old_docker' in main_script
@@ -54,6 +58,7 @@ assert 'net.ParseIP(host).IsLoopback()' in native_source
 assert 'strings.HasPrefix(suffix, "/ui/")' in native_source
 assert 'http.FileServer(http.Dir(a.dashboardDir))' in native_source
 manager_source = (ROOT / "manager/main.go").read_text(encoding="utf-8")
+assert 'envOr("MIXED_PORT", "7890")' in manager_source
 assert '"DASHBOARD_DIR"' in manager_source
 assert '"CORE_CONTROLLER"' in manager_source
 assert '"tunActive"' in manager_source
@@ -86,13 +91,14 @@ with tempfile.TemporaryDirectory() as temporary:
     assert len(secret) == 64 and all(char in "0123456789abcdef" for char in secret)
     assert secret_file.stat().st_mode & 0o777 == 0o600
     assert f"secret={secret}\n" in settings.read_text()
-    assert "mix_port=17890\n" in settings.read_text()
-    assert "mixed-port: 17890\n" in profile.read_text()
+    assert "mix_port=7890\n" in settings.read_text()
+    assert "mixed-port: 7890\n" in profile.read_text()
     assert marker.is_file() and providers.is_dir()
     assert not (base / "var/ShellCrash/configs/command.env").exists()
 
-    profile.write_text("mixed-port: 7890\nproxy-providers:\n  existing:\n    type: http\n    url: https://sub.example/nodes\n")
-    settings.write_text("mix_port=7890\ndb_port=9999\nsecret=preserve-me\n")
+    # Simulate upgrading an installation whose saved profile and ShellCrash settings use 17890.
+    profile.write_text("mixed-port: 17890\nproxy-providers:\n  existing:\n    type: http\n    url: https://sub.example/nodes\n")
+    settings.write_text("mix_port=17890\ndb_port=9999\nsecret=preserve-me\n")
     existing_provider = providers / "provider.yaml"
     existing_provider.write_text("proxies:\n  - name: keep\n")
     before = {
@@ -124,16 +130,18 @@ with tempfile.TemporaryDirectory() as temporary:
         "PATH": f"{fake_bin}:{os.environ.get('PATH', '')}",
         "DOCKER_LOG": str(docker_log),
     }
-    settings.write_text("mix_port=7890\ndb_port=9999\nsecret=preserve-me\ndisoverride=0\n")
+    settings.write_text("mix_port=17890\ndb_port=9999\nsecret=preserve-me\ndisoverride=0\n")
     manager_settings = base / "var/ShellCrash/configs/subscription-manager.json"
     manager_settings.write_text(json.dumps({"url": "https://sub.example/profile?token=private", "intervalHours": 24}))
     profile.write_text("proxy-providers:\n  primary:\n    type: http\n    url: https://sub.example/nodes\n")
     original_settings = settings.read_text()
+    original_profile = profile.read_bytes()
     run(ROOT / "cmd/upgrade_init", upgrade_env)
     assert "disoverride=1\n" in settings.read_text()
-    assert "mix_port=7890\n" in settings.read_text()
+    assert "mix_port=17890\n" in settings.read_text()
     assert "db_port=9999\n" in settings.read_text()
     assert "secret=preserve-me\n" in settings.read_text()
+    assert profile.read_bytes() == original_profile
     config_backup = base / "var/ShellCrash/configs/fnos-subscription-shellcrash-settings.backup"
     assert config_backup.read_text() == original_settings
     assert config_backup.stat().st_mode & 0o777 == 0o600

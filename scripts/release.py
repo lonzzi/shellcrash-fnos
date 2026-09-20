@@ -349,7 +349,7 @@ def build(tag, mihomo_tag, version, fnpack):
 - 启用 TUN 后在 fnOS 宿主机网络空间启用 `auto-route` 与 Linux `auto-redirect`，并绕过本机环回、私网和链路本地网段。
 - 状态页分别显示 Mihomo Core 连接状态、宿主机 TUN 接口和混合代理端口。
 - 高级面板静态文件由 MetaCubeXD [{dashboard_info['commit'][:12]}](https://github.com/{METACUBEXD_REPO}/tree/{dashboard_info['commit']}) 提供，并随 FPK 一起离线安装。
-- 局域网 HTTP/SOCKS 混合代理仍使用 TCP/UDP 17890；Core 控制器仅绑定 `127.0.0.1:9999`。
+- 局域网 HTTP/SOCKS 混合代理默认使用 TCP/UDP 7890；Core 控制器仅绑定 `127.0.0.1:9999`。
 - 订阅 providers、组和规则不被拆分或自动改写；DNS/TUN 开关仍可分别覆盖。
 
 架构包：`shellcrash-fnos-{version}-x86.fpk`、`shellcrash-fnos-{version}-arm.fpk`。

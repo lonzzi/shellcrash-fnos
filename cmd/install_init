@@ -29,7 +29,7 @@ if [ ! -s "$TRIM_PKGVAR/ShellCrash/configs/ShellCrash.cfg" ]; then
     cat > "$tmp" <<EOF
 # ShellCrash fnOS defaults. Edit with care.
 secret=$secret
-mix_port=17890
+mix_port=7890
 db_port=9999
 firewall_area=4
 redir_mod=纯净模式
@@ -47,7 +47,7 @@ if [ ! -s "$TRIM_PKGVAR/ShellCrash/yamls/config.yaml" ]; then
     trap 'rm -f "$tmp"' EXIT
 cat > "$tmp" <<EOF
 # Starter config only. Import your own subscription/config before proxy use.
-mixed-port: 17890
+mixed-port: 7890
 allow-lan: true
 bind-address: "*"
 mode: rule

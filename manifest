@@ -1,5 +1,5 @@
 appname=shellcrash-fnos
-version=1.9.4-8
+version=1.9.4-9
 display_name=ShellCrash
 desc=Native Mihomo for fnOS with authenticated desktop UI and host-wide TUN.
 platform=all
@@ -9,6 +9,6 @@ distributor=lonzzi
 desktop_uidir=ui
 desktop_applaunchname=shellcrash-fnos.main
 os_min_version=1.1.3100
-service_port=17890
+service_port=7890
 checkport=true
 ctl_stop=true

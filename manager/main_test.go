@@ -204,7 +204,7 @@ func TestPrepareNativeRuntimeChangesOnlyManagedFields(t *testing.T) {
 	settingsPath := filepath.Join(base, "ShellCrash", "configs", "subscription-manager.json")
 	overlayPath := filepath.Join(base, "ShellCrash", "configs", "fnos-overrides.yaml")
 	secretPath := filepath.Join(base, "api.secret")
-	profile := []byte("mixed-port: 7890\nallow-lan: true\nbind-address: 0.0.0.0\nexternal-controller: :9999\nsecret: old-secret\nproxy-providers:\n  primary:\n    type: http\n    url: https://1.1.1.1/nodes.yaml\nproxy-groups:\n  - name: Main\n    type: select\n    use: [primary]\nrules:\n  - MATCH,Main\n")
+	profile := []byte("mixed-port: 17890\nallow-lan: true\nbind-address: 0.0.0.0\nexternal-controller: :9999\nsecret: old-secret\nproxy-providers:\n  primary:\n    type: http\n    url: https://1.1.1.1/nodes.yaml\nproxy-groups:\n  - name: Main\n    type: select\n    use: [primary]\nrules:\n  - MATCH,Main\n")
 	for path, contents := range map[string][]byte{
 		profilePath:  profile,
 		overlayPath:  []byte(overlayConfig),
@@ -224,7 +224,7 @@ func TestPrepareNativeRuntimeChangesOnlyManagedFields(t *testing.T) {
 		settingsPath:      settingsPath,
 		overlayPath:       overlayPath,
 		secretFile:        secretPath,
-		mixedPort:         17890,
+		mixedPort:         7890,
 	}
 	if err := app.prepareNativeRuntime(); err != nil {
 		t.Fatal(err)
@@ -237,8 +237,8 @@ func TestPrepareNativeRuntimeChangesOnlyManagedFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if scalarValue(mappingValue(root, "mixed-port")) != "17890" {
-		t.Fatal("runtime did not retain the external 17890 proxy port")
+	if scalarValue(mappingValue(root, "mixed-port")) != "7890" {
+		t.Fatal("runtime did not apply the default 7890 proxy port")
 	}
 	if scalarValue(mappingValue(root, "external-controller")) != "127.0.0.1:9999" {
 		t.Fatal("runtime controller is not loopback-only")

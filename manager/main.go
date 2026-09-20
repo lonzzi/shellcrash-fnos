@@ -157,7 +157,7 @@ func main() {
 		version:           envOr("MANAGER_VERSION", buildVersion),
 		coreHTTP:          &http.Client{Timeout: 15 * time.Second},
 	}
-	if port, err := strconv.Atoi(envOr("MIXED_PORT", "17890")); err == nil && port > 0 && port <= 65535 {
+	if port, err := strconv.Atoi(envOr("MIXED_PORT", "7890")); err == nil && port > 0 && port <= 65535 {
 		app.mixedPort = port
 	} else {
 		log.Fatal("invalid MIXED_PORT")
