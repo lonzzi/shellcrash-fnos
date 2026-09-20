@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>ShellCrash 订阅管理</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <main class="page">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">SHELLCRASH · fnOS</p>
+        <h1>订阅管理</h1>
+        <p class="intro">导入完整 Clash / Mihomo 配置，保留订阅自带的 providers、策略组和规则。</p>
+      </div>
+      <div class="panel-nav">
+        <a class="advanced" href="../ui/#/setup">打开高级面板 <span aria-hidden="true">↗</span></a>
+        <small>高级面板右下角可返回订阅管理；关闭 fnOS 窗口可回到桌面。</small>
+      </div>
+    </header>
+
+    <section class="status-card" aria-live="polite">
+      <div class="status-heading">
+        <span id="status-dot" class="status-dot"></span>
+        <div>
+          <h2 id="status-title">正在读取状态…</h2>
+          <p id="status-summary" class="muted">订阅链接只保存在这台 NAS 的应用配置目录中。</p>
+        </div>
+      </div>
+      <dl class="facts">
+        <div><dt>已加载节点</dt><dd id="proxy-count">—</dd></div>
+        <div><dt>Provider 数</dt><dd id="provider-count">—</dd></div>
+        <div><dt>上次更新</dt><dd id="last-success">—</dd></div>
+        <div><dt>Mihomo Core</dt><dd id="core-status">—</dd></div>
+        <div><dt>宿主机 TUN 接口</dt><dd id="tun-status">—</dd></div>
+        <div><dt>混合代理端口</dt><dd id="proxy-port">—</dd></div>
+      </dl>
+      <p id="provider-warning" class="warning" hidden></p>
+      <p id="last-error" class="error" hidden></p>
+    </section>
+
+    <section class="panel">
+      <div class="section-heading">
+        <div>
+          <h2>订阅来源</h2>
+          <p class="muted">完整配置会作为主配置载入；管理器不重写策略组，也不会把 provider 自动塞进组。</p>
+        </div>
+      </div>
+      <form id="subscription-form">
+        <label class="field">
+          <span>订阅链接</span>
+          <input id="subscription-url" type="password" autocomplete="new-password" spellcheck="false" placeholder="https://…">
+            <small id="url-help">支持完整 Mihomo 配置（包括 proxy-providers、规则和策略组）。保存时会立即检查并载入。</small>
+          </label>
+        <label class="field interval-field">
+          <span>完整配置自动更新间隔</span>
+          <div class="interval-control">
+            <input id="interval-hours" type="number" min="1" max="720" step="1" value="24" required>
+            <span>小时</span>
+          </div>
+          <small>管理器按此间隔重新读取配置；Mihomo 仍按各 provider 自己的 interval 更新节点。</small>
+        </label>
+        <section class="field">
+          <div>
+            <span>DNS / TUN</span>
+            <p class="muted">分别控制 DNS 解析和 TUN。选择“跟随订阅”不覆盖原配置；“开启 / 关闭”会覆盖订阅里的 enable 值，其他参数保留。</p>
+          </div>
+          <div class="feature-grid">
+            <section class="feature-card">
+              <div>
+                <h3>DNS 解析</h3>
+                <p>覆盖订阅中的 <code>dns.enable</code></p>
+              </div>
+              <div class="mode-switch" role="radiogroup" aria-label="DNS 解析模式">
+                <label><input type="radio" name="dns-mode" value="inherit"><span>跟随订阅</span></label>
+                <label><input type="radio" name="dns-mode" value="on"><span>开启</span></label>
+                <label><input type="radio" name="dns-mode" value="off"><span>关闭</span></label>
+              </div>
+            </section>
+            <section class="feature-card">
+              <div>
+                <h3>TUN 模式</h3>
+                <p>覆盖订阅中的 <code>tun.enable</code></p>
+              </div>
+              <div class="mode-switch" role="radiogroup" aria-label="TUN 模式">
+                <label><input type="radio" name="tun-mode" value="inherit"><span>跟随订阅</span></label>
+                <label><input type="radio" name="tun-mode" value="on"><span>开启</span></label>
+                <label><input type="radio" name="tun-mode" value="off"><span>关闭</span></label>
+              </div>
+            </section>
+          </div>
+          <small>这是 fnOS 宿主机原生 TUN：自动路由接管 NAS 本机流量，Linux 自动重定向也覆盖 NAS 上转发的 TCP 流量；局域网私有地址保留直连。它不会把 NAS 变成供其他局域网设备使用的旁路由。修改后点击“保存并应用”。</small>
+        </section>
+        <details class="advanced-config">
+          <summary>高级：自定义 DNS / TUN 参数（YAML，可选）</summary>
+          <label class="field">
+            <span>高级覆盖配置</span>
+            <textarea id="overlay-yaml" rows="12" spellcheck="false" placeholder="dns:\n  enable: true\ntun:\n  enable: true"></textarea>
+            <small>仅接受 dns 和 tun 两个顶层字段。TUN 开启时会启用 auto-route、Linux auto-redirect、网卡自动检测，并排除 loopback、局域网及 Docker 私网路由；协议栈使用 system。DNS 开启时会劫持 UDP/TCP 53。</small>
+          </label>
+        </details>
+        <div class="actions">
+          <button id="save-button" class="primary" type="submit">保存并应用</button>
+          <button id="refresh-button" class="secondary" type="button" hidden>立即更新</button>
+          <button id="delete-button" class="danger" type="button" hidden>移除订阅</button>
+          <span id="form-message" class="form-message" role="status"></span>
+        </div>
+      </form>
+    </section>
+
+    <footer>
+      <p>空闲时实时流量为 0 是正常的；只有请求经过代理才会出现流量。可用局域网客户端连接 NAS 地址的 17890 端口测试。</p>
+      <p id="version"></p>
+    </footer>
+  </main>
+</body>
+</html>

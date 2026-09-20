@@ -13,15 +13,88 @@ for path in \
     }
 done
 
-# Older package revisions may not have seeded the upstream S6 command file.
-if [ ! -s "$TRIM_PKGVAR/ShellCrash/configs/command.env" ]; then
-    tmp=$(mktemp "$TRIM_PKGVAR/ShellCrash/configs/command.env.XXXXXX")
-    trap 'rm -f "$tmp"' EXIT
-    cat > "$tmp" <<'EOF'
-TMPDIR='/tmp/ShellCrash'
-BINDIR='/etc/ShellCrash'
-COMMAND='"/tmp/ShellCrash/CrashCore" -d "/etc/ShellCrash" -f "/tmp/ShellCrash/config.yaml"'
-EOF
-    chmod 600 "$tmp"
-    mv "$tmp" "$TRIM_PKGVAR/ShellCrash/configs/command.env"
+# Preserve the complete live Docker-based installation before switching this
+# FPK to native host networking. The archive is private and stays beside data.
+if [ -f "$TRIM_APPDEST/docker/docker-compose.yaml" ]; then
+    backup_dir="$TRIM_PKGVAR/.codex-backups"
+    mkdir -p "$backup_dir"
+    chmod 700 "$backup_dir"
+
+    if command -v docker >/dev/null 2>&1; then
+        for container in shellcrash-fnos-gateway shellcrash-fnos; do
+            if docker inspect "$container" >/dev/null 2>&1; then
+                docker stop "$container" >/dev/null
+            fi
+        done
+    fi
+
+    if ! compgen -G "$backup_dir/shellcrash-before-native-*.tar.gz" >/dev/null; then
+        stamp=$(date -u +%Y%m%dT%H%M%SZ)
+        archive="$backup_dir/shellcrash-before-native-$stamp.tar.gz"
+        tmp=$(mktemp "$backup_dir/.native-backup.XXXXXX")
+        if ! tar -czf "$tmp" -C "$TRIM_PKGVAR" ShellCrash -C "$TRIM_PKGETC" api.secret; then
+            rm -f "$tmp"
+            docker start shellcrash-fnos >/dev/null 2>&1 || true
+            docker start shellcrash-fnos-gateway >/dev/null 2>&1 || true
+            echo 'Could not create the private native-upgrade backup; the existing app was restarted.' > "$TRIM_TEMP_LOGFILE"
+            exit 1
+        fi
+        chmod 600 "$tmp"
+        mv "$tmp" "$archive"
+    fi
+
+    touch "$TRIM_PKGVAR/.native-upgrade-pending"
+    chmod 600 "$TRIM_PKGVAR/.native-upgrade-pending"
+fi
+
+# Add the private local provider directory for the subscription manager.
+# Existing profiles and manager settings are left untouched.
+mkdir -p "$TRIM_PKGVAR/ShellCrash/providers"
+chmod 700 "$TRIM_PKGVAR/ShellCrash/providers"
+
+# ShellCrash's normal YAML modifier reconstructs sections and can break YAML
+# anchors in a complete Mihomo subscription. Preserve that profile verbatim.
+manager_settings="$TRIM_PKGVAR/ShellCrash/configs/subscription-manager.json"
+profile="$TRIM_PKGVAR/ShellCrash/yamls/config.yaml"
+shell_config="$TRIM_PKGVAR/ShellCrash/configs/ShellCrash.cfg"
+shell_backup="$TRIM_PKGVAR/ShellCrash/configs/fnos-subscription-shellcrash-settings.backup"
+if [ -s "$manager_settings" ] && \
+    grep -Eq '"url"[[:space:]]*:[[:space:]]*"https?://' "$manager_settings" && \
+    grep -Eq '^proxy-providers:[[:space:]]*(#.*)?$' "$profile"; then
+    [ -f "$shell_config" ] || {
+        echo "Full-profile subscription is active but ShellCrash.cfg is missing. Upgrade stopped to protect data." > "$TRIM_TEMP_LOGFILE"
+        exit 1
+    }
+
+    backup_tmp=""
+    config_tmp=""
+    cleanup_migration_files() {
+        [ -z "$backup_tmp" ] || rm -f "$backup_tmp"
+        [ -z "$config_tmp" ] || rm -f "$config_tmp"
+    }
+    trap cleanup_migration_files EXIT
+
+    if [ ! -e "$shell_backup" ]; then
+        backup_tmp=$(mktemp "$shell_backup.XXXXXX")
+        cat "$shell_config" > "$backup_tmp"
+        chmod 600 "$backup_tmp"
+        mv "$backup_tmp" "$shell_backup"
+        backup_tmp=""
+    fi
+
+    if ! grep -Eq '^[[:space:]]*disoverride[[:space:]]*=[[:space:]]*1([[:space:]]|$)' "$shell_config"; then
+        config_tmp=$(mktemp "$shell_config.XXXXXX")
+        cp -p "$shell_config" "$config_tmp"
+        awk '
+            /^[[:space:]]*disoverride[[:space:]]*=/ {
+                if (!updated) print "disoverride=1"
+                updated=1
+                next
+            }
+            { print }
+            END { if (!updated) print "disoverride=1" }
+        ' "$shell_config" > "$config_tmp"
+        mv "$config_tmp" "$shell_config"
+        config_tmp=""
+    fi
 fi

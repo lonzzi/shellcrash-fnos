@@ -8,10 +8,14 @@ on:
         description: 'Official stable ShellCrash release (blank = latest)'
         type: string
         default: ''
-      package_revision:
-        description: 'Increment to repackage the same upstream release'
+      mihomo_tag:
+        description: 'Official stable Mihomo release (blank = latest)'
         type: string
-        default: '1'
+        default: ''
+      package_revision:
+        description: 'Optional package revision override (blank = automatic)'
+        type: string
+        default: ''
 permissions:
   contents: read
 concurrency:
@@ -23,7 +27,7 @@ jobs:
     outputs:
       build: ${{ steps.check.outputs.build }}
       tag: ${{ steps.check.outputs.tag }}
-      image_tag: ${{ steps.check.outputs.image_tag }}
+      mihomo_tag: ${{ steps.check.outputs.mihomo_tag }}
       release_tag: ${{ steps.check.outputs.release_tag }}
       version: ${{ steps.check.outputs.version }}
     steps:
@@ -32,19 +36,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           UPSTREAM_TAG: ${{ inputs.upstream_tag }}
-          PACKAGE_REVISION: ${{ inputs.package_revision || '1' }}
+          MIHOMO_TAG: ${{ inputs.mihomo_tag }}
+          PACKAGE_REVISION: ${{ inputs.package_revision }}
         run: python3 scripts/release.py detect
   build:
     needs: detect
     if: needs.detect.outputs.build == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    outputs:
-      image: ${{ steps.package.outputs.image }}
-      gateway_image: ${{ steps.package.outputs.gateway_image }}
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: manager/go.mod
+          cache-dependency-path: manager/go.sum
       - name: Download pinned fnpack
         run: |
           curl --fail --location --retry 3 https://static2.fnnas.com/fnpack/fnpack-1.2.3-linux-amd64 -o "$RUNNER_TEMP/fnpack"
@@ -52,18 +57,16 @@ jobs:
           chmod +x "$RUNNER_TEMP/fnpack"
       - name: Validate package source
         run: python3 scripts/check.py
-      - name: Build FPK against immutable official images
+      - name: Build native amd64 and ARM64 FPKs
         id: package
         env:
+          GH_TOKEN: ${{ github.token }}
           UPSTREAM_TAG: ${{ needs.detect.outputs.tag }}
-          UPSTREAM_IMAGE_TAG: ${{ needs.detect.outputs.image_tag }}
+          MIHOMO_TAG: ${{ needs.detect.outputs.mihomo_tag }}
           PACKAGE_VERSION: ${{ needs.detect.outputs.version }}
-        run: python3 scripts/release.py build --tag "$UPSTREAM_TAG" --image-tag "$UPSTREAM_IMAGE_TAG" --version "$PACKAGE_VERSION" --fnpack "$RUNNER_TEMP/fnpack"
-      - name: Smoke-test the fnOS gateway and authenticated API
-        env:
-          SHELLCRASH_IMAGE: ${{ steps.package.outputs.image }}
-          GATEWAY_IMAGE: ${{ steps.package.outputs.gateway_image }}
-        run: bash scripts/smoke.sh
+        run: python3 scripts/release.py build --tag "$UPSTREAM_TAG" --mihomo-tag "$MIHOMO_TAG" --version "$PACKAGE_VERSION" --fnpack "$RUNNER_TEMP/fnpack"
+      - name: Smoke-test native Core, host TUN configuration, and fnOS gateway
+        run: bash scripts/smoke.sh .build/package/x86
       - uses: actions/upload-artifact@v4
         with:
           name: fpk
@@ -85,13 +88,14 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ needs.detect.outputs.release_tag }}
           PACKAGE_VERSION: ${{ needs.detect.outputs.version }}
+          MIHOMO_TAG: ${{ needs.detect.outputs.mihomo_tag }}
           COMMIT: ${{ github.sha }}
         run: |
           set -euo pipefail
           cd dist
           sha256sum -c SHA256SUMS
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --draft --target "$COMMIT" --title "ShellCrash $PACKAGE_VERSION for fnOS" --notes-file release-notes.md
+            gh release create "$RELEASE_TAG" --draft --target "$COMMIT" --title "ShellCrash $PACKAGE_VERSION for fnOS (Mihomo $MIHOMO_TAG)" --notes-file release-notes.md
           fi
           gh release upload "$RELEASE_TAG" ./*.fpk SHA256SUMS upstream.json --clobber
           gh release edit "$RELEASE_TAG" --draft=false

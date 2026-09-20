@@ -7,4 +7,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: manager/go.mod
+          cache-dependency-path: manager/go.sum
+      - run: cd manager && go test ./... && go vet ./...
       - run: python3 scripts/check.py

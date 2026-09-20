@@ -1,7 +1,7 @@
 appname=shellcrash-fnos
-version=1.9.4.2
+version=1.9.4-3
 display_name=ShellCrash
-desc=ShellCrash with an fnOS-authenticated desktop Web UI. Community Docker package for fnOS.
+desc=Native Mihomo for fnOS with authenticated desktop UI and host-wide TUN.
 platform=all
 source=thirdparty
 maintainer=lonzzi
@@ -9,6 +9,6 @@ distributor=lonzzi
 desktop_uidir=ui
 desktop_applaunchname=shellcrash-fnos.main
 os_min_version=1.1.3100
-service_port=19120
+service_port=17890
 checkport=true
 ctl_stop=true

@@ -1,28 +1,41 @@
 #!/usr/bin/env python3
-"""Resolve an official ShellCrash stable release and build its fnOS FPK."""
+"""Build native fnOS FPKs from official ShellCrash and Mihomo releases."""
+
 import argparse
+import base64
+import gzip
 import hashlib
+import io
 import json
 import os
 import pathlib
+import posixpath
 import re
 import shutil
+import struct
 import subprocess
 import urllib.error
 import urllib.request
+import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-UPSTREAM = "juewuy/ShellCrash"
-IMAGE = "juewuy/shellcrash"
-GATEWAY_IMAGE = "nginx"
-GATEWAY_IMAGE_TAG = "stable-alpine"
+SHELLCRASH_REPO = "juewuy/ShellCrash"
+MIHOMO_REPO = "MetaCubeX/mihomo"
+METACUBEXD_REPO = "MetaCubeX/metacubexd"
 STABLE_TAG = re.compile(r"v?([0-9]+)\.([0-9]+)\.([0-9]+)\Z")
+
+
+def version_from_tag(tag):
+    match = STABLE_TAG.fullmatch(tag)
+    if match is None:
+        raise ValueError(f"Unsupported release tag: {tag}")
+    return ".".join(match.groups())
 
 
 def api(path, missing=False):
     headers = {
         "Accept": "application/vnd.github+json",
-        "User-Agent": "shellcrash-fnos",
+        "User-Agent": "shellcrash-fnos-native",
     }
     if os.getenv("GH_TOKEN"):
         headers["Authorization"] = "Bearer " + os.environ["GH_TOKEN"]
@@ -36,34 +49,70 @@ def api(path, missing=False):
         raise
 
 
-def detect():
-    requested = os.getenv("UPSTREAM_TAG", "").strip()
-    if requested and not STABLE_TAG.fullmatch(requested):
-        raise ValueError("Only numeric stable release tags are supported")
-    release = api(
-        f"repos/{UPSTREAM}/releases/"
-        + ("tags/" + requested if requested else "latest")
-    )
+def stable_release(repository, requested_tag):
+    if requested_tag:
+        release = api(f"repos/{repository}/releases/tags/{requested_tag}")
+    else:
+        release = api(f"repos/{repository}/releases/latest")
     tag = release["tag_name"]
     if release["draft"] or release["prerelease"] or not STABLE_TAG.fullmatch(tag):
-        raise ValueError("Unsupported or non-stable upstream release")
+        raise ValueError(f"Unsupported or non-stable release for {repository}: {tag}")
+    return release
 
-    version_tag = tag[1:] if tag.startswith("v") else tag
-    revision = os.getenv("PACKAGE_REVISION", "1")
-    if not re.fullmatch(r"[1-9][0-9]{0,3}", revision):
-        raise ValueError("Invalid package revision")
 
-    release_tag = f"{version_tag}-fnos.{revision}"
-    existing = api(
-        f"repos/{os.environ['GITHUB_REPOSITORY']}/releases/tags/{release_tag}",
-        missing=True,
+def release_revision(releases, shell_version, core_version):
+    maximum = 0
+    pair = re.compile(
+        rf"^{re.escape(shell_version)}-mihomo\.([0-9]+\.[0-9]+\.[0-9]+)-fnos\.([1-9][0-9]{{0,3}})$"
     )
+    legacy = re.compile(rf"^{re.escape(shell_version)}-fnos\.([1-9][0-9]*)$")
+    exact = None
+    for release in releases:
+        tag = release.get("tag_name", "")
+        match = pair.fullmatch(tag)
+        if match:
+            revision = int(match.group(2))
+            maximum = max(maximum, revision)
+            if match.group(1) == core_version:
+                exact = release
+            continue
+        match = legacy.fullmatch(tag)
+        if match:
+            maximum = max(maximum, int(match.group(1)))
+    return exact, maximum
+
+
+def detect():
+    requested_shell = os.getenv("UPSTREAM_TAG", "").strip()
+    requested_core = os.getenv("MIHOMO_TAG", "").strip()
+    shell_release = stable_release(SHELLCRASH_REPO, requested_shell)
+    core_release = stable_release(MIHOMO_REPO, requested_core)
+    shell_tag = shell_release["tag_name"]
+    core_tag = core_release["tag_name"]
+    shell_version = version_from_tag(shell_tag)
+    core_version = version_from_tag(core_tag)
+
+    repository = os.environ["GITHUB_REPOSITORY"]
+    releases = api(f"repos/{repository}/releases?per_page=100")
+    exact, maximum = release_revision(releases, shell_version, core_version)
+    requested_revision = os.getenv("PACKAGE_REVISION", "").strip()
+    if requested_revision and not re.fullmatch(r"[1-9][0-9]{0,3}", requested_revision):
+        raise ValueError("Invalid package revision")
+    revision = int(requested_revision) if requested_revision else (maximum + 1 if exact is None else int(re.search(r"-fnos\.([0-9]+)$", exact["tag_name"]).group(1)))
+    release_tag = f"{shell_version}-mihomo.{core_version}-fnos.{revision}"
+    existing = api(f"repos/{repository}/releases/tags/{release_tag}", missing=True)
+    if requested_revision:
+        build = existing is None or existing["draft"]
+    else:
+        build = exact is None or exact["draft"]
+        if exact is not None:
+            release_tag = exact["tag_name"]
     values = {
-        "build": str(existing is None or existing["draft"]).lower(),
-        "tag": tag,
-        "image_tag": f"{version_tag}release",
+        "build": str(build).lower(),
+        "tag": shell_tag,
+        "mihomo_tag": core_tag,
         "release_tag": release_tag,
-        "version": f"{version_tag}.{revision}",
+        "version": f"{shell_version}-{revision}",
     }
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
         for key, value in values.items():
@@ -71,124 +120,247 @@ def detect():
     print(json.dumps(values, sort_keys=True))
 
 
-def resolve_image(repository, image_tag):
-    reference = f"{repository}:{image_tag}"
-    inspection = subprocess.check_output(
-        ["docker", "buildx", "imagetools", "inspect", reference],
-        text=True,
+def asset_for(release, name):
+    for asset in release.get("assets", []):
+        if asset["name"] == name:
+            return asset
+    raise ValueError(f"Official Mihomo release is missing asset: {name}")
+
+
+def download_asset(asset, destination):
+    request = urllib.request.Request(
+        asset["browser_download_url"],
+        headers={"User-Agent": "shellcrash-fnos-native"},
     )
-    match = re.search(r"^Digest:\s+(sha256:[0-9a-f]{64})\s*$", inspection, re.M)
-    if not match:
-        raise ValueError("Official image index digest not found")
-    pinned = f"{repository}@{match.group(1)}"
-    raw = subprocess.check_output(
-        ["docker", "buildx", "imagetools", "inspect", "--raw", pinned],
-        text=True,
-    )
-    index = json.loads(raw)
-    platforms = {
-        (
-            item.get("platform", {}).get("os"),
-            item.get("platform", {}).get("architecture"),
-        )
-        for item in index.get("manifests", [])
+    with urllib.request.urlopen(request, timeout=180) as response:
+        payload = response.read()
+    expected = asset.get("digest", "")
+    actual = "sha256:" + hashlib.sha256(payload).hexdigest()
+    if expected and actual != expected:
+        raise ValueError(f"Official asset digest mismatch for {asset['name']}")
+    destination.write_bytes(payload)
+    return actual.removeprefix("sha256:")
+
+
+def binary_arch(binary):
+    if len(binary) < 20 or binary[:4] != b"\x7fELF":
+        raise ValueError("Mihomo release asset is not an ELF executable")
+    machine = struct.unpack_from("<H", binary, 18)[0]
+    return {62: "amd64", 183: "arm64"}.get(machine, "unknown")
+
+
+def fetch_core(release, architecture, destination):
+    version = version_from_tag(release["tag_name"])
+    if architecture == "amd64":
+        asset_name = f"mihomo-linux-amd64-compatible-v{version}.gz"
+    elif architecture == "arm64":
+        asset_name = f"mihomo-linux-arm64-v{version}.gz"
+    else:
+        raise ValueError(f"Unsupported package architecture: {architecture}")
+    asset = asset_for(release, asset_name)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    compressed_path = destination.with_suffix(".gz")
+    asset_sha256 = download_asset(asset, compressed_path)
+    binary = gzip.decompress(compressed_path.read_bytes())
+    compressed_path.unlink()
+    if binary_arch(binary) != architecture:
+        raise ValueError(f"Mihomo asset architecture does not match {architecture}")
+    destination.write_bytes(binary)
+    destination.chmod(0o755)
+    return {
+        "asset": asset_name,
+        "asset_sha256": asset_sha256,
+        "binary_sha256": hashlib.sha256(binary).hexdigest(),
+        "asset_url": asset["browser_download_url"],
+        "bytes": len(binary),
     }
-    required = {("linux", "amd64"), ("linux", "arm64")}
-    if not required <= platforms:
-        raise ValueError("Official image must provide linux/amd64 and linux/arm64")
-    return pinned
 
 
-def build(tag, image_tag, version, fnpack):
-    if not STABLE_TAG.fullmatch(tag):
-        raise ValueError("Invalid upstream release tag")
-    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+\.[1-9][0-9]{0,3}", version):
-        raise ValueError("Invalid package version")
+def fetch_dashboard(destination):
+    branch_commit = api(f"repos/{METACUBEXD_REPO}/commits/gh-pages")["sha"]
+    archive_url = f"https://codeload.github.com/{METACUBEXD_REPO}/zip/{branch_commit}"
+    request = urllib.request.Request(archive_url, headers={"User-Agent": "shellcrash-fnos-native"})
+    with urllib.request.urlopen(request, timeout=180) as response:
+        archive = response.read()
+    archive_sha256 = hashlib.sha256(archive).hexdigest()
+    destination.mkdir(parents=True, exist_ok=True)
+    extracted = 0
+    with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
+        roots = {item.filename.split("/", 1)[0] for item in bundle.infolist() if "/" in item.filename}
+        if len(roots) != 1:
+            raise ValueError("MetaCubeXD archive has an unexpected directory layout")
+        prefix = next(iter(roots)) + "/"
+        for item in bundle.infolist():
+            if item.is_dir() or not item.filename.startswith(prefix):
+                continue
+            relative = item.filename[len(prefix):]
+            if not relative or posixpath.isabs(relative) or ".." in pathlib.PurePosixPath(relative).parts:
+                raise ValueError("MetaCubeXD archive contains an unsafe file path")
+            target = destination.joinpath(*pathlib.PurePosixPath(relative).parts)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(bundle.read(item))
+            extracted += 1
+    index = destination / "index.html"
+    if not index.is_file() or extracted == 0:
+        raise ValueError("MetaCubeXD gh-pages archive is missing index.html")
 
-    pinned = resolve_image(IMAGE, image_tag)
-    gateway_pinned = resolve_image(GATEWAY_IMAGE, GATEWAY_IMAGE_TAG)
-    stage = ROOT / ".build" / "package"
+    license_document = api(f"repos/{METACUBEXD_REPO}/license")
+    if license_document.get("encoding") != "base64":
+        raise ValueError("MetaCubeXD license response could not be decoded")
+    license_text = base64.b64decode(license_document["content"]).decode("utf-8")
+    license_path = destination / "THIRD-PARTY-LICENSE.txt"
+    license_path.write_text(license_text, encoding="utf-8")
+    return {
+        "repository": METACUBEXD_REPO,
+        "branch": "gh-pages",
+        "commit": branch_commit,
+        "archive_url": archive_url,
+        "archive_sha256": archive_sha256,
+        "license": license_document.get("license", {}).get("spdx_id", "unknown"),
+        "license_sha256": hashlib.sha256(license_text.encode("utf-8")).hexdigest(),
+        "files": extracted,
+    }
+
+
+def build_manager(stage, version, architecture):
+    binary = stage / "app/bin/shellcrash-manager"
+    binary.parent.mkdir(parents=True, exist_ok=True)
+    environment = os.environ.copy()
+    environment.update({"CGO_ENABLED": "0", "GOOS": "linux", "GOARCH": architecture})
+    subprocess.run(
+        [
+            "go",
+            "build",
+            "-buildvcs=false",
+            "-trimpath",
+            "-ldflags",
+            f"-s -w -X main.buildVersion={version}",
+            "-o",
+            str(binary),
+            ".",
+        ],
+        cwd=ROOT / "manager",
+        env=environment,
+        check=True,
+    )
+    binary.chmod(0o755)
+    return hashlib.sha256(binary.read_bytes()).hexdigest()
+
+
+def stage_package(architecture, platform, shell_version, package_version, core_release, dashboard_source, dashboard_info, fnpack):
+    stage = ROOT / ".build" / "package" / platform
     if stage.exists():
         shutil.rmtree(stage)
     stage.mkdir(parents=True)
     for name in ("app", "cmd", "config", "wizard"):
         shutil.copytree(ROOT / name, stage / name)
-    for name in ("manifest", "ICON.PNG", "ICON_256.PNG", "LICENSE-UPSTREAM.txt"):
+    for name in ("manifest", "ICON.PNG", "ICON_256.PNG", "LICENSE-UPSTREAM.txt", "ShellCrash.sc"):
         shutil.copy2(ROOT / name, stage / name)
+    shutil.copytree(dashboard_source, stage / "app/dashboard")
 
     manifest = stage / "manifest"
-    manifest.write_text(
-        re.sub(r"^version=.*$", "version=" + version, manifest.read_text(), flags=re.M)
-    )
-    compose = stage / "app/docker/docker-compose.yaml"
-    compose.write_text(
-        compose.read_text()
-        .replace("@@IMAGE@@", pinned)
-        .replace("@@GATEWAY_IMAGE@@", gateway_pinned)
-    )
-    if "@@IMAGE@@" in compose.read_text() or "@@GATEWAY_IMAGE@@" in compose.read_text():
-        raise ValueError("FPK Compose file still contains unresolved image placeholders")
+    manifest_text = manifest.read_text()
+    manifest_text = re.sub(r"^version=.*$", "version=" + package_version, manifest_text, flags=re.M)
+    manifest_text = re.sub(r"^platform=.*$", "platform=" + platform, manifest_text, flags=re.M)
+    manifest.write_text(manifest_text)
 
-    provenance = {
-        "upstream_repository": UPSTREAM,
-        "upstream_tag": tag,
-        "upstream_release": f"https://github.com/{UPSTREAM}/releases/tag/{tag}",
-        "package_version": version,
-        "image": pinned,
-        "image_tag": image_tag,
-        "gateway_image": gateway_pinned,
-        "gateway_image_tag": GATEWAY_IMAGE_TAG,
-        "platforms": ["linux/amd64", "linux/arm64"],
+    core_info = fetch_core(core_release, architecture, stage / "app/bin/mihomo")
+    manager_sha256 = build_manager(stage, package_version, architecture)
+    upstream = {
+        "upstream_repository": SHELLCRASH_REPO,
+        "upstream_tag": shell_version,
+        "upstream_release": f"https://github.com/{SHELLCRASH_REPO}/releases/tag/{shell_version}",
+        "core_repository": MIHOMO_REPO,
+        "core_tag": core_release["tag_name"],
+        "core_release": f"https://github.com/{MIHOMO_REPO}/releases/tag/{core_release['tag_name']}",
+        "package_version": package_version,
+        "package_platform": platform,
+        "architecture": architecture,
+        "core": core_info,
+        "dashboard": dashboard_info,
+        "manager_sha256": manager_sha256,
         "fnpack": "1.2.3",
+        "runtime": "native fnOS process; no Docker service",
     }
-    (stage / "app/upstream.json").write_text(json.dumps(provenance, indent=2) + "\n")
-    subprocess.run(
-        [str(pathlib.Path(fnpack).resolve()), "build"],
-        cwd=stage,
-        check=True,
-    )
+    (stage / "app/upstream.json").write_text(json.dumps(upstream, indent=2) + "\n")
+    subprocess.run([str(pathlib.Path(fnpack).resolve()), "build"], cwd=stage, check=True)
     artifacts = list(stage.glob("*.fpk"))
     if len(artifacts) != 1:
-        raise ValueError("fnpack did not produce exactly one FPK")
+        raise ValueError(f"fnpack did not produce exactly one FPK for {platform}")
+    return stage, upstream, artifacts[0]
 
+
+def build(tag, mihomo_tag, version, fnpack):
+    if not STABLE_TAG.fullmatch(tag) or not STABLE_TAG.fullmatch(mihomo_tag):
+        raise ValueError("Invalid upstream release tag")
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+-[1-9][0-9]{0,3}", version):
+        raise ValueError("Invalid package version")
+    shell_release = stable_release(SHELLCRASH_REPO, tag)
+    core_release = stable_release(MIHOMO_REPO, mihomo_tag)
+    shell_version = version_from_tag(shell_release["tag_name"])
+    if not version.startswith(shell_version + "-"):
+        raise ValueError("Package version does not match the ShellCrash release")
+
+    stage_root = ROOT / ".build" / "package"
+    if stage_root.exists():
+        shutil.rmtree(stage_root)
+    dashboard_source = ROOT / ".build" / "metacubexd"
+    if dashboard_source.exists():
+        shutil.rmtree(dashboard_source)
+    dashboard_info = fetch_dashboard(dashboard_source)
     dist = ROOT / "dist"
     dist.mkdir(exist_ok=True)
-    target = dist / f"shellcrash-fnos-{version}-all.fpk"
-    shutil.copy2(artifacts[0], target)
+
+    outputs = []
+    provenance = {
+        "upstream_repository": SHELLCRASH_REPO,
+        "upstream_tag": shell_release["tag_name"],
+        "core_repository": MIHOMO_REPO,
+        "core_tag": core_release["tag_name"],
+        "package_version": version,
+        "packages": {},
+    }
+    for architecture, platform in (("amd64", "x86"), ("arm64", "arm")):
+        stage, arch_upstream, artifact = stage_package(
+            architecture, platform, shell_release["tag_name"], version, core_release,
+            dashboard_source, dashboard_info, fnpack
+        )
+        target = dist / f"shellcrash-fnos-{version}-{platform}.fpk"
+        shutil.copy2(artifact, target)
+        outputs.append(target)
+        provenance["packages"][platform] = arch_upstream
+
     metadata = dist / "upstream.json"
     metadata.write_text(json.dumps(provenance, indent=2) + "\n")
+    all_files = outputs + [metadata]
     (dist / "SHA256SUMS").write_text(
-        "".join(
-            hashlib.sha256(item.read_bytes()).hexdigest() + "  " + item.name + "\n"
-            for item in (target, metadata)
-        )
+        "".join(hashlib.sha256(item.read_bytes()).hexdigest() + "  " + item.name + "\n" for item in all_files)
     )
+    shell_tag = shell_release["tag_name"]
+    core_tag = core_release["tag_name"]
     (dist / "release-notes.md").write_text(
         f"""ShellCrash for fnOS — {version}
 
-上游稳定版：[{tag}](https://github.com/{UPSTREAM}/releases/tag/{tag})
+基于 ShellCrash [{shell_tag}](https://github.com/{SHELLCRASH_REPO}/releases/tag/{shell_tag}) 配置布局，使用官方 Mihomo 核心 [{core_tag}](https://github.com/{MIHOMO_REPO}/releases/tag/{core_tag})。
 
-- 在 fnOS 桌面图标中以嵌入式小窗口打开 ShellCrash Web 面板。
-- 通过 fnOS 统一网关使用登录态；管理员首次打开自动连接本机 Mihomo，无需手动填入 API 密钥。
-- Mihomo API 仍保留密钥鉴权；桌面连接由本机网关代理在服务端注入密钥，密钥不会放入浏览器 URL。
-- 支持 amd64 / ARM64；安装前请启用 fnOS Docker。
-- 初始配置只为 Web 面板提供可启动的空白 Mihomo 配置，不包含代理节点。
-- API 密钥保存在应用配置目录 api.secret；默认面板端口 19120，代理端口 17890。
-- FPK 安装和升级时会从 Docker Hub 拉取官方多架构镜像，需要 NAS 联网。
-- 配置保存在应用数据目录；升级保留配置。卸载时请保留仍需使用的数据。
-- 默认使用容器网络和普通 HTTP/SOCKS 代理，不修改 fnOS 宿主机防火墙。
-- 桌面免密入口使用 fnOS 管理员登录态，要求系统版本不低于 1.1.3100；非管理员仍不能访问该入口。
+- 原生 fnOS 服务进程，不要求安装 Docker；FPK 按 x86_64 与 ARM64 分别打包。
+- 桌面图标仍在 fnOS 内嵌小窗口打开订阅管理；使用 fnOS 管理员登录态，不单独暴露管理口。
+- 迁移保留现有 profile、订阅、providers、策略组、DNS/TUN 覆盖和 API 密钥；迁移前自动生成权限为 600 的配置归档。
+- 启用 TUN 后在 fnOS 宿主机网络空间启用 `auto-route` 与 Linux `auto-redirect`，并绕过本机环回、私网和链路本地网段。
+- 状态页分别显示 Mihomo Core 连接状态、宿主机 TUN 接口和混合代理端口。
+- 高级面板静态文件由 MetaCubeXD [{dashboard_info['commit'][:12]}](https://github.com/{METACUBEXD_REPO}/tree/{dashboard_info['commit']}) 提供，并随 FPK 一起离线安装。
+- 局域网 HTTP/SOCKS 混合代理仍使用 TCP/UDP 17890；Core 控制器仅绑定 `127.0.0.1:9999`。
+- 订阅 providers、组和规则不被拆分或自动改写；DNS/TUN 开关仍可分别覆盖。
 
-ShellCrash 镜像固定为 {pinned}；网关镜像固定为 {gateway_pinned}。
-校验文件：SHA256SUMS；构建来源：upstream.json。
+架构包：`shellcrash-fnos-{version}-x86.fpk`、`shellcrash-fnos-{version}-arm.fpk`。
+校验文件：SHA256SUMS；上游和二进制校验信息：upstream.json。
 """
     )
     output_path = os.getenv("GITHUB_OUTPUT")
     if output_path:
         with open(output_path, "a", encoding="utf-8") as output:
-            output.write("image=" + pinned + "\n")
-            output.write("gateway_image=" + gateway_pinned + "\n")
-    print(target)
+            output.write("mihomo_tag=" + core_tag + "\n")
+    print("\n".join(str(item) for item in outputs))
 
 
 if __name__ == "__main__":
@@ -197,11 +369,11 @@ if __name__ == "__main__":
     sub.add_parser("detect")
     build_parser = sub.add_parser("build")
     build_parser.add_argument("--tag", required=True)
-    build_parser.add_argument("--image-tag", required=True)
+    build_parser.add_argument("--mihomo-tag", required=True)
     build_parser.add_argument("--version", required=True)
     build_parser.add_argument("--fnpack", required=True)
-    arguments = parser.parse_args()
-    if arguments.command == "detect":
+    args = parser.parse_args()
+    if args.command == "detect":
         detect()
     else:
-        build(arguments.tag, arguments.image_tag, arguments.version, arguments.fnpack)
+        build(args.tag, args.mihomo_tag, args.version, args.fnpack)

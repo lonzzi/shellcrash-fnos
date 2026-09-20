@@ -4,3 +4,9 @@ set -eu
 [ -s "$TRIM_PKGVAR/ShellCrash/configs/ShellCrash.cfg" ] || { echo 'ShellCrash settings are missing after upgrade.' > "$TRIM_TEMP_LOGFILE"; exit 1; }
 [ -d "$TRIM_PKGVAR/ShellCrash/yamls" ] || { echo 'ShellCrash profiles are missing after upgrade.' > "$TRIM_TEMP_LOGFILE"; exit 1; }
 [ -d "$TRIM_PKGVAR/ShellCrash/jsons" ] || { echo 'ShellCrash JSON profiles are missing after upgrade.' > "$TRIM_TEMP_LOGFILE"; exit 1; }
+[ -d "$TRIM_PKGVAR/ShellCrash/providers" ] || { echo 'ShellCrash provider directory is missing after upgrade.' > "$TRIM_TEMP_LOGFILE"; exit 1; }
+[ -x "$TRIM_APPDEST/bin/mihomo" ] || { echo 'Native Mihomo binary is missing after upgrade.' > "$TRIM_TEMP_LOGFILE"; exit 1; }
+[ -x "$TRIM_APPDEST/bin/shellcrash-manager" ] || { echo 'Native manager binary is missing after upgrade.' > "$TRIM_TEMP_LOGFILE"; exit 1; }
+[ -s "$TRIM_APPDEST/dashboard/index.html" ] || { echo 'MetaCubeXD dashboard files are missing after upgrade.' > "$TRIM_TEMP_LOGFILE"; exit 1; }
+mkdir -p "$TRIM_PKGVAR/ShellCrash/runtime"
+chmod 700 "$TRIM_PKGVAR/ShellCrash/runtime"

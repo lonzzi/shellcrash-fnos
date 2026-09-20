@@ -1,11 +1,140 @@
 #!/bin/bash
-case "${1:-}" in
-  start|stop) exit 0 ;;
-  status)
-    for container in shellcrash-fnos shellcrash-fnos-gateway; do
-      state=$(docker inspect --format '{{.State.Status}}' "$container" 2>/dev/null) || exit 3
-      [ "$state" = 'running' ] || exit 3
+set -euo pipefail
+umask 077
+
+APP_DIR="${TRIM_APPDEST:?TRIM_APPDEST is required}"
+APP_DATA="${TRIM_PKGVAR:?TRIM_PKGVAR is required}"
+APP_CONFIG="${TRIM_PKGETC:?TRIM_PKGETC is required}"
+DATA_DIR="$APP_DATA/ShellCrash"
+MANAGER="$APP_DIR/bin/shellcrash-manager"
+CORE="$APP_DIR/bin/mihomo"
+PID_FILE="$APP_DATA/shellcrash-fnos.pid"
+LOG_FILE="$APP_DATA/shellcrash-fnos.log"
+UPGRADE_MARKER="$APP_DATA/.native-upgrade-pending"
+
+export CORE_BINARY="$CORE"
+export CORE_CONTROLLER="127.0.0.1:9999"
+export CORE_DATA_DIR="$DATA_DIR"
+export CORE_LOG_PATH="$DATA_DIR/native-core.log"
+export CONFIG_PATH="$DATA_DIR/yamls/config.yaml"
+export RUNTIME_CONFIG_PATH="$DATA_DIR/runtime/config.yaml"
+export SETTINGS_PATH="$DATA_DIR/configs/subscription-manager.json"
+export OVERLAY_PATH="$DATA_DIR/configs/fnos-overrides.yaml"
+export PROFILE_BACKUP_PATH="$DATA_DIR/configs/fnos-subscription-profile.backup.yaml"
+export RUNTIME_BACKUP_PATH="$DATA_DIR/configs/fnos-subscription-runtime.backup.yaml"
+export SHELLCRASH_CONFIG_PATH="$DATA_DIR/configs/ShellCrash.cfg"
+export SHELLCRASH_BACKUP_PATH="$DATA_DIR/configs/fnos-subscription-shellcrash-settings.backup"
+export API_SECRET_FILE="$APP_CONFIG/api.secret"
+export API_URL="http://127.0.0.1:9999"
+export LISTEN_ADDR="127.0.0.1:9998"
+export GATEWAY_SOCKET="$APP_DIR/app.sock"
+export APP_PREFIX="/app/shellcrash-fnos"
+export DASHBOARD_DIR="$APP_DIR/dashboard"
+export MIXED_PORT="17890"
+export MANAGER_VERSION="$(sed -n 's/^version=//p' "$APP_DIR/../manifest" 2>/dev/null | head -n 1)"
+
+process_matches() {
+  local pid="$1"
+  [ -r "/proc/$pid/exe" ] && [ "$(readlink "/proc/$pid/exe" 2>/dev/null || true)" = "$MANAGER" ]
+}
+
+manager_running() {
+  [ -s "$PID_FILE" ] || return 1
+  local pid
+  pid=$(cat "$PID_FILE")
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  kill -0 "$pid" 2>/dev/null && process_matches "$pid"
+}
+
+healthy() {
+  curl --fail --silent --show-error --max-time 2 http://127.0.0.1:9998/healthz >/dev/null 2>&1
+}
+
+restore_old_docker() {
+  command -v docker >/dev/null 2>&1 || return 0
+  docker start shellcrash-fnos >/dev/null 2>&1 || true
+  docker start shellcrash-fnos-gateway >/dev/null 2>&1 || true
+}
+
+remove_old_docker() {
+  [ -f "$UPGRADE_MARKER" ] || return 0
+  command -v docker >/dev/null 2>&1 || return 0
+  docker rm -f shellcrash-fnos-gateway shellcrash-fnos >/dev/null 2>&1 || true
+  rm -f "$UPGRADE_MARKER"
+}
+
+stop_process() {
+  local pid=""
+  if [ -s "$PID_FILE" ]; then
+    pid=$(cat "$PID_FILE")
+  fi
+  if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null && process_matches "$pid"; then
+    kill -TERM "$pid" 2>/dev/null || true
+    for _ in $(seq 1 30); do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 1
     done
-    exit 0 ;;
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -KILL "$pid" 2>/dev/null || true
+    fi
+  fi
+  rm -f "$PID_FILE"
+  for proc in /proc/[0-9]*; do
+    [ -r "$proc/exe" ] || continue
+    exe=$(readlink "$proc/exe" 2>/dev/null || true)
+    [ "$exe" = "$CORE" ] || continue
+    core_pid=${proc#/proc/}
+    kill -TERM "$core_pid" 2>/dev/null || true
+  done
+  for _ in $(seq 1 10); do
+    pgrep -f "^$CORE -d $DATA_DIR -f $RUNTIME_CONFIG_PATH$" >/dev/null 2>&1 || break
+    sleep 1
+  done
+}
+
+start_process() {
+  [ -x "$MANAGER" ] || { echo 'Native manager binary is missing' > "${TRIM_TEMP_LOGFILE:-/dev/null}"; return 1; }
+  [ -x "$CORE" ] || { echo 'Mihomo binary is missing' > "${TRIM_TEMP_LOGFILE:-/dev/null}"; return 1; }
+  [ -s "$API_SECRET_FILE" ] || { echo 'Mihomo API secret is missing' > "${TRIM_TEMP_LOGFILE:-/dev/null}"; return 1; }
+  [ -s "$CONFIG_PATH" ] || { echo 'Existing Mihomo configuration is missing; no data was changed' > "${TRIM_TEMP_LOGFILE:-/dev/null}"; return 1; }
+
+  if manager_running && healthy; then
+    return 0
+  fi
+  stop_process
+  mkdir -p "$DATA_DIR/runtime"
+  chmod 700 "$DATA_DIR" "$DATA_DIR/runtime"
+  nohup "$MANAGER" >> "$LOG_FILE" 2>&1 </dev/null &
+  local pid=$!
+  local pid_tmp="$PID_FILE.tmp.$$"
+  printf '%s\n' "$pid" > "$pid_tmp"
+  chmod 600 "$pid_tmp"
+  mv "$pid_tmp" "$PID_FILE"
+
+  for _ in $(seq 1 60); do
+    if healthy && manager_running; then
+      remove_old_docker
+      return 0
+    fi
+    if ! kill -0 "$pid" 2>/dev/null; then
+      break
+    fi
+    sleep 1
+  done
+
+  stop_process
+  if [ -f "$UPGRADE_MARKER" ]; then
+    restore_old_docker
+  fi
+  echo 'Native Mihomo did not become ready. The previous Docker app was restored if this was an upgrade; see the private app log.' > "${TRIM_TEMP_LOGFILE:-/dev/null}"
+  return 1
+}
+
+case "${1:-}" in
+  start) start_process ;;
+  stop) stop_process ;;
+  status)
+    manager_running && healthy || exit 3
+    ;;
   *) exit 1 ;;
 esac

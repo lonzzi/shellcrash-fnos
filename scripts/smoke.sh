@@ -1,156 +1,157 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if ! declare -p SHELLCRASH_IMAGE >/dev/null 2>&1 || test -z "$SHELLCRASH_IMAGE"; then
-  echo "SHELLCRASH_IMAGE must be set to a digest-pinned official image"
-  exit 1
-fi
-if ! declare -p GATEWAY_IMAGE >/dev/null 2>&1 || test -z "$GATEWAY_IMAGE"; then
-  echo "GATEWAY_IMAGE must be set to a digest-pinned Nginx image"
-  exit 1
-fi
+package_dir="${1:?usage: scripts/smoke.sh <staged-package-directory>}"
+package_dir="$(cd "$package_dir" && pwd)"
+manager_binary="$package_dir/app/bin/shellcrash-manager"
+core_binary="$package_dir/app/bin/mihomo"
+dashboard_dir="$package_dir/app/dashboard"
+for path in "$manager_binary" "$core_binary" "$dashboard_dir/index.html"; do
+  test -e "$path" || { echo "Native package file is missing: $path" >&2; exit 1; }
+done
+for command in curl python3; do
+  command -v "$command" >/dev/null 2>&1 || { echo "$command is required for the native smoke test" >&2; exit 1; }
+done
 
-tmp=$(mktemp -d)
-name="shellcrash-fnos-smoke-$$"
-gateway_name="$name-gateway"
-network="$name-network"
-gateway_dir="$(cd "$(dirname "$0")/../app/docker/gateway" && pwd)"
-secret=
-smoke_passed=false
+root="$(cd "$(dirname "$0")/.." && pwd)"
+tmp="$(mktemp -d)"
+manager_pid=""
 cleanup() {
-  if test "$smoke_passed" != true && docker inspect "$gateway_name" >/dev/null 2>&1; then
-    echo "Gateway container startup diagnostics (generated API secret redacted):" >&2
-    docker inspect --format '{{.State.Status}} exit={{.State.ExitCode}}' "$gateway_name" >&2 || true
-    docker logs "$gateway_name" 2>&1 | sed "s/$secret/[REDACTED]/g" | tail -100 >&2 || true
+  if test -n "$manager_pid" && kill -0 "$manager_pid" 2>/dev/null; then
+    kill -TERM "$manager_pid" 2>/dev/null || true
+    wait "$manager_pid" 2>/dev/null || true
   fi
-  docker rm -f "$gateway_name" "$name" >/dev/null 2>&1 || true
-  docker network rm "$network" >/dev/null 2>&1 || true
   rm -rf "$tmp"
 }
 trap cleanup EXIT
 
-mkdir -p "$tmp/etc" "$tmp/data" "$tmp/target"
-TRIM_PKGETC="$tmp/etc" \
-TRIM_PKGVAR="$tmp/data" \
-bash cmd/install_init
-secret=$(cat "$tmp/etc/api.secret")
+read -r api_port manager_port proxy_port <<EOF_PORTS
+$(python3 - <<'PY'
+import socket
+ports=[]
+for _ in range(3):
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        ports.append(sock.getsockname()[1])
+print(*ports)
+PY
+)
+EOF_PORTS
 
-docker network create "$network" >/dev/null
-docker run -d --name "$name" \
-  --network "$network" --network-alias shellcrash \
-  -p 127.0.0.1::9999/tcp \
-  -v "$tmp/data/ShellCrash/configs:/etc/ShellCrash/configs" \
-  -v "$tmp/data/ShellCrash/yamls:/etc/ShellCrash/yamls" \
-  -v "$tmp/data/ShellCrash/jsons:/etc/ShellCrash/jsons" \
-  -v "$tmp/data/ShellCrash/configs/.autostart:/etc/s6-overlay/s6-rc.d/user/contents.d/shellcrash:ro" \
-  -v "$tmp/data/ShellCrash/configs/.autostart:/etc/s6-overlay/s6-rc.d/user/contents.d/afstart" \
-  -e TZ=Asia/Shanghai \
-  "$SHELLCRASH_IMAGE" >/dev/null
+mkdir -p "$tmp/etc" "$tmp/data"
+TRIM_PKGETC="$tmp/etc" TRIM_PKGVAR="$tmp/data" bash "$root/cmd/install_init"
+secret="$(cat "$tmp/etc/api.secret")"
 
-port=
-for _ in $(seq 1 36); do
-  port=$(docker inspect --format '{{(index (index .NetworkSettings.Ports "9999/tcp") 0).HostPort}}' "$name")
-  if test -n "$port" && curl --silent --fail --max-time 2 \
-      -H "Authorization: Bearer $secret" "http://127.0.0.1:$port/version" >/dev/null; then
+CORE_BINARY="$core_binary" \
+CORE_CONTROLLER="127.0.0.1:$api_port" \
+CORE_DATA_DIR="$tmp/data/ShellCrash" \
+CORE_LOG_PATH="$tmp/data/ShellCrash/native-core.log" \
+CONFIG_PATH="$tmp/data/ShellCrash/yamls/config.yaml" \
+RUNTIME_CONFIG_PATH="$tmp/data/ShellCrash/runtime/config.yaml" \
+SETTINGS_PATH="$tmp/data/ShellCrash/configs/subscription-manager.json" \
+OVERLAY_PATH="$tmp/data/ShellCrash/configs/fnos-overrides.yaml" \
+PROFILE_BACKUP_PATH="$tmp/data/ShellCrash/configs/fnos-subscription-profile.backup.yaml" \
+RUNTIME_BACKUP_PATH="$tmp/data/ShellCrash/configs/fnos-subscription-runtime.backup.yaml" \
+SHELLCRASH_CONFIG_PATH="$tmp/data/ShellCrash/configs/ShellCrash.cfg" \
+SHELLCRASH_BACKUP_PATH="$tmp/data/ShellCrash/configs/fnos-subscription-shellcrash-settings.backup" \
+API_SECRET_FILE="$tmp/etc/api.secret" \
+API_URL="http://127.0.0.1:$api_port" \
+LISTEN_ADDR="127.0.0.1:$manager_port" \
+GATEWAY_SOCKET="$tmp/app.sock" \
+APP_PREFIX="/app/shellcrash-fnos" \
+DASHBOARD_DIR="$dashboard_dir" \
+MIXED_PORT="$proxy_port" \
+MANAGER_VERSION="smoke-test" \
+"$manager_binary" >"$tmp/manager.log" 2>&1 &
+manager_pid=$!
+
+ready=false
+for _ in $(seq 1 90); do
+  if test -S "$tmp/app.sock" && curl --silent --fail --max-time 2 "http://127.0.0.1:$manager_port/healthz" >/dev/null; then
+    ready=true
     break
   fi
-  port=
-  sleep 5
-done
-if test -z "$port"; then
-  echo "ShellCrash API did not become ready"
-  exit 1
-fi
-
-base="http://127.0.0.1:$port"
-code=$(curl --silent --output /dev/null --write-out '%{http_code}' "$base/version")
-echo "Direct unauthenticated /version returned HTTP $code"
-if test "$code" != 401; then
-  echo "ShellCrash API did not reject a request without its token"
-  exit 1
-fi
-
-docker run -d --name "$gateway_name" --network "$network" \
-  -v "$tmp/target:/app/target" \
-  -v "$tmp/etc/api.secret:/run/secrets/shellcrash-api.secret:ro" \
-  -v "$gateway_dir:/etc/shellcrash-gateway:ro" \
-  --entrypoint /bin/sh "$GATEWAY_IMAGE" \
-  /etc/shellcrash-gateway/entrypoint.sh >/dev/null
-
-socket="$tmp/target/app.sock"
-socket_ready=false
-for _ in $(seq 1 30); do
-  if test -S "$socket"; then
-    socket_ready=true
-    break
+  if ! kill -0 "$manager_pid" 2>/dev/null; then
+    cat "$tmp/manager.log" >&2
+    echo "Native manager exited before Core and fnOS gateway became ready" >&2
+    exit 1
   fi
   sleep 1
 done
-if test "$socket_ready" != true; then
-  echo "fnOS gateway Unix socket did not become ready"
+if test "$ready" != true; then
+  cat "$tmp/manager.log" >&2
+  echo "Native Core and fnOS gateway did not become ready" >&2
   exit 1
 fi
+
+api="http://127.0.0.1:$api_port"
+code=$(curl --silent --output "$tmp/unauthorized.json" --write-out '%{http_code}' "$api/version")
+echo "Direct unauthenticated Core API returned HTTP $code"
+test "$code" = 401
 
 gateway="http://localhost/app/shellcrash-fnos"
-code=$(curl --silent --unix-socket "$socket" --output /dev/null \
-  --write-out '%{http_code}' "$gateway/version")
+code=$(curl --silent --unix-socket "$tmp/app.sock" --output /dev/null --write-out '%{http_code}' "$gateway/manager/api/status")
 echo "Gateway request without fnOS user headers returned HTTP $code"
-if test "$code" != 401; then
-  echo "Gateway accepted a request without fnOS identity headers"
-  exit 1
-fi
-
-code=$(curl --silent --unix-socket "$socket" --output /dev/null \
-  --write-out '%{http_code}' -H 'X-Trim-Userid: 1000' \
-  -H 'X-Trim-Isadmin: false' "$gateway/version")
+test "$code" = 401
+code=$(curl --silent --unix-socket "$tmp/app.sock" --output /dev/null --write-out '%{http_code}' \
+  -H 'X-Trim-Userid: 1000' -H 'X-Trim-Isadmin: false' "$gateway/manager/api/status")
 echo "Gateway request from a non-admin returned HTTP $code"
-if test "$code" != 403; then
-  echo "Gateway did not reject a non-admin request"
+test "$code" = 403
+
+headers=(-H 'X-Trim-Userid: 0' -H 'X-Trim-Isadmin: true')
+code=$(curl --silent --show-error --unix-socket "$tmp/app.sock" --output "$tmp/status.json" --write-out '%{http_code}' \
+  "${headers[@]}" "$gateway/manager/api/status")
+echo "Admin manager status returned HTTP $code"
+test "$code" = 200
+python3 - "$tmp/status.json" "$proxy_port" <<'PY'
+import json, sys
+status=json.load(open(sys.argv[1], encoding="utf-8"))
+assert status["coreConnected"] is True, status
+assert status["tunActive"] is False, status
+assert status["proxyPort"] == int(sys.argv[2]), status
+assert any(group["name"] == "Proxy" for group in status["groups"]), status
+PY
+if grep -Fq "$secret" "$tmp/status.json"; then
+  echo "Manager status leaked the API secret" >&2
   exit 1
 fi
 
-code=$(curl --silent --show-error --unix-socket "$socket" \
-  --output "$tmp/version.json" --write-out '%{http_code}' \
-  -H 'X-Trim-Userid: 0' -H 'X-Trim-Isadmin: true' "$gateway/version")
-echo "Admin gateway /version returned HTTP $code"
-if test "$code" != 200 || ! grep -q '"version"' "$tmp/version.json"; then
-  echo "Gateway did not inject the API token for an admin request"
-  exit 1
-fi
+code=$(curl --silent --show-error --unix-socket "$tmp/app.sock" --output "$tmp/version.json" --write-out '%{http_code}' \
+  "${headers[@]}" "$gateway/version")
+echo "Admin Core API gateway returned HTTP $code"
+test "$code" = 200
+grep -q '"version"' "$tmp/version.json"
 
-code=$(curl --silent --show-error --unix-socket "$socket" \
-  --output "$tmp/dashboard.html" --write-out '%{http_code}' \
-  -H 'X-Trim-Userid: 0' -H 'X-Trim-Isadmin: true' "$gateway/ui/")
-echo "Admin gateway dashboard returned HTTP $code"
-if test "$code" != 200 || ! grep -Eiq '<!doctype html|<html' "$tmp/dashboard.html"; then
-  echo "Gateway did not return the dashboard HTML"
-  exit 1
-fi
-if ! grep -Fq "q.set('secondaryPath','/app/shellcrash-fnos')" "$tmp/dashboard.html"; then
-  echo "Dashboard did not receive the fnOS auto-connect bootstrap"
-  exit 1
-fi
+code=$(curl --silent --show-error --unix-socket "$tmp/app.sock" --output "$tmp/manager.html" --write-out '%{http_code}' \
+  "${headers[@]}" "$gateway/manager/")
+echo "Admin manager page returned HTTP $code"
+test "$code" = 200
+grep -Fq 'ShellCrash 订阅管理' "$tmp/manager.html"
+
+code=$(curl --silent --show-error --unix-socket "$tmp/app.sock" --output "$tmp/dashboard.html" --write-out '%{http_code}' \
+  "${headers[@]}" "$gateway/ui/")
+echo "Admin MetaCubeXD dashboard returned HTTP $code"
+test "$code" = 200
+grep -Fq 'const base="/app/shellcrash-fnos"' "$tmp/dashboard.html"
+grep -Fq "q.set('secondaryPath',base)" "$tmp/dashboard.html"
+grep -Fq 'shellcrash-fnos-back' "$tmp/dashboard.html"
 if grep -Fq "$secret" "$tmp/dashboard.html"; then
-  echo "Dashboard HTML leaked the ShellCrash API secret"
+  echo "Dashboard HTML leaked the API secret" >&2
   exit 1
 fi
 
-asset=$(sed -n 's/.*src="\(\.\/assets\/[^" ]*\.js\)".*/\1/p' "$tmp/dashboard.html" | head -n 1)
-if test -z "$asset"; then
-  echo "Could not find the Dashboard JavaScript asset"
+asset_reference=$(grep -Eo '(src|href)="\./(_nuxt|assets)/[^"]+\.(js|css)"' "$tmp/dashboard.html" | head -n 1 || true)
+if test -z "$asset_reference"; then
+  echo "No relative dashboard JS/CSS asset was found" >&2
   exit 1
 fi
-asset_path=$(printf '%s' "$asset" | sed 's|^\./||')
-code=$(curl --silent --show-error --unix-socket "$socket" \
-  --output "$tmp/dashboard.js" --write-out '%{http_code}' \
-  -H 'X-Trim-Userid: 0' -H 'X-Trim-Isadmin: true' \
-  "$gateway/ui/$asset_path")
-echo "Dashboard JavaScript through the gateway returned HTTP $code"
-if test "$code" != 200 || ! grep -q 'secondaryPath' "$tmp/dashboard.js"; then
-  echo "Dashboard static assets did not resolve through the gateway prefix"
-  exit 1
-fi
+asset_path="${asset_reference#*=}"
+asset_path="${asset_path#\"./}"
+asset_path="${asset_path%\"}"
+code=$(curl --silent --show-error --unix-socket "$tmp/app.sock" --output "$tmp/dashboard.asset" --write-out '%{http_code}' \
+  "${headers[@]}" "$gateway/ui/$asset_path")
+echo "Dashboard static asset returned HTTP $code"
+test "$code" = 200
+test -s "$tmp/dashboard.asset"
 
-test -f "$tmp/data/ShellCrash/configs/.autostart"
-smoke_passed=true
-echo "ShellCrash API, fnOS identity gate, secret injection, dashboard bootstrap, and gateway assets passed smoke test"
+echo "Native Mihomo API, manager, admin-only fnOS gateway, and bundled dashboard passed. TUN routing itself is validated on the live fnOS host."

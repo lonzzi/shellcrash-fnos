@@ -1,71 +1,60 @@
 # ShellCrash for 飞牛 fnOS
 
-把 [ShellCrash](https://github.com/juewuy/ShellCrash) 官方 Docker 镜像封装为 fnOS FPK。安装后会在飞牛桌面添加图标，点击后在 fnOS 内嵌小窗口打开 Mihomo Web 面板。
+将 ShellCrash 兼容配置、官方 Mihomo Core 和 MetaCubeXD 面板打包为 fnOS 原生 FPK。Core 和订阅管理器直接运行在 fnOS 宿主机上；不需要 Docker，也不把 TUN 限制在容器网络里。桌面图标通过 fnOS 网关在内嵌小窗口打开订阅管理页，高级面板也留在同一个窗口。
 
-这是社区封装，与 ShellCrash 作者和飞牛官方无隶属关系。ShellCrash 及其上游资源遵循各自许可证；本仓库保留上游 GPL-3.0 许可证文本。
+这是社区维护的第三方封装，不隶属于 ShellCrash、MetaCubeX 或飞牛官方。上游配置与许可证信息随包提供。
 
-## 安装与首次使用
+## 安装和升级
 
-1. 确认 fnOS 版本不低于 1.1.3100，并在应用中心安装、启用 Docker。
-2. 从 [Releases](https://github.com/lonzzi/shellcrash-fnos/releases) 下载最新的 FPK，在应用中心选择“手动安装”。
-3. 等待应用从 Docker Hub 下载官方镜像。NAS 需要联网，FPK 本身不包含容器镜像。
-4. 使用 fnOS 管理员账号登录桌面并点击 ShellCrash 图标。面板在 fnOS 内嵌小窗口中打开，并通过统一网关自动连接本机 Mihomo，无需单独输入密钥。
+1. 从 [Releases](https://github.com/lonzzi/shellcrash-fnos/releases) 下载与你的 fnOS 设备架构相符的 FPK：x86_64 选 `x86`，ARM64 选 `arm`。
+2. 在 fnOS 应用中心手动安装。应用会创建初始配置和本机 API 密钥；只有管理员可以从桌面入口打开控制界面。
+3. 在订阅管理页填入完整 Clash/Mihomo YAML 订阅链接，设置 1 到 720 小时的更新间隔。管理器保留订阅中的 `proxy-providers`、策略组、规则和节点，不会擅自把 provider 填进组。
+4. DNS 和 TUN 可以分别选择跟随订阅、开启或关闭。保存会检查新配置；失败时会恢复之前的 profile、runtime 和 ShellCrash 设置。
 
-应用会生成一个空白 Mihomo 配置，让 Web 面板启动并可连接 API。它不含任何代理节点，也不会替你导入订阅。导入自己的配置后再使用代理。应用会在容器启动时启用官方 S6 服务；需要通过 ShellCrash 菜单管理配置时，可以 SSH 到 NAS 后运行：
+从旧 Docker 版升级时，升级脚本会先停掉旧容器，并在 `/vol1/@appdata/shellcrash-fnos/.codex-backups/` 创建权限为 `600` 的完整配置与密钥归档。新 Core 启动且健康检查通过后才会删除旧容器。已有订阅、providers、策略组、API 密钥、DNS/TUN 覆盖和应用数据会保留；若原生服务未就绪，启动钩子会尝试重新启动旧容器。卸载默认保留配置数据。
 
-    docker exec -it shellcrash-fnos crash
+## 整机 TUN 和代理端口
 
-## 端口、网络和安全
+启用 TUN 后，Mihomo 作为 fnOS 宿主机 root 服务运行，使用 Linux TUN、`auto-route` 和 `auto-redirect`。这会在宿主机网络空间设置路由；自动重定向用于 TCP，UDP 等流量由 TUN 路由接管。环回、链路本地和常用私网地址段会加入排除列表，以免影响本机和局域网管理连接。实现参考 [fnOS Mihomo 原生 FPK 示例](https://github.com/conversun/fnos-apps/tree/main/apps/mihomo)，TUN 字段遵循 [Mihomo TUN 文档](https://wiki.metacubex.one/en/config/inbound/tun/)。
 
-- fnOS 桌面 Web 面板：通过统一网关在 iframe 小窗中打开，复用 fnOS 登录态；入口仅对管理员可见，后端也会拒绝非管理员请求。
-- 备用直连 API/Web 面板：NAS 的 TCP 19120 → 容器 TCP 9999，需要 API 密钥。首次安装生成的密钥在 `${TRIM_PKGETC}/api.secret`，默认安装目录通常为 `/vol1/@appconf/shellcrash-fnos/api.secret`。
-- HTTP/SOCKS 混合代理：NAS 的 TCP/UDP 17890 → 容器 TCP/UDP 7890。
-- 配置、订阅和 JSON 配置文件分别保存在 /vol1/@appdata/shellcrash-fnos/ShellCrash/configs、yamls 和 jsons。
-- API 密钥保存在应用配置目录 `api.secret`，权限为 0600；ShellCrash 设置文件也会保存同一密钥，供 Mihomo API 校验。桌面自动连接由网关容器在服务端注入密钥，密钥不会写进页面或 URL。
-- 默认使用普通 Docker bridge 网络和容器内代理，不开放 Docker socket，不使用 host 网络，也不修改 fnOS 宿主机防火墙。
+订阅的规则与策略决定 TUN 捕获后的流量走代理节点还是 `DIRECT`。所以“Core 已连接”和“TUN 接口运行”代表宿主机路由已启用；如果希望公网请求经代理出去，还要在 Mihomo 面板中确认当前策略组选中了可用节点，并让规则命中该组。订阅若默认 `MATCH,DIRECT`，整机流量会经 Mihomo 处理但不会经代理服务器转发。
 
-Web 面板可以管理代理配置和连接，请限制 19120 与 17890 端口的可访问范围。不要把它们直接暴露到互联网；远程访问请使用 VPN 或带身份验证的 HTTPS 反向代理。
+- HTTP/SOCKS 混合代理监听 NAS 的 TCP/UDP `17890`，可供局域网设备显式使用。
+- Mihomo 控制器只绑定 `127.0.0.1:9999`，管理器只绑定 `127.0.0.1:9998`，不额外暴露管理端口。
+- `17890` 流量端口按 fnOS 应用端口配置开放；不要把它直接暴露给不可信网络。
+- 桌面小窗使用 fnOS 管理员登录态；API 密钥保存在应用配置目录，权限为 `600`，不会写进页面或 URL。
+- 高级 MetaCubeXD 面板随 FPK 离线安装。右下角的“返回 ShellCrash 订阅管理”可以回到管理页，关闭 fnOS 窗口可返回桌面。
 
-透明代理、旁路由和接管其他设备流量需要单独规划网络。上游 Docker 指南推荐 macvlan 等方式，并要求相应的 Linux 网络能力；本 FPK 默认不授予容器这些权限。
+状态页会显示 Core API 是否连接、TUN 接口是否处于 UP 状态和混合代理端口。可从 NAS 终端用不带代理环境变量的请求做整机 TUN 测试，例如 `env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY curl -I --max-time 20 https://www.google.com`。再从高级面板的 Connections 检查这条请求实际命中的规则、代理链和流量。空闲时实时流量为 0 是正常现象。
 
-## 配置与升级
+ShellCrash 配置保存在 `/vol1/@appdata/shellcrash-fnos/ShellCrash/`，本机 API 密钥保存在 `/vol1/@appconf/shellcrash-fnos/api.secret`。完整订阅配置可能带有 provider URL，因此这些文件保持私有权限；Web 状态接口不会返回订阅链接或 API 密钥。
 
-- 官方 ShellCrash 稳定版镜像由 Docker Hub 提供，FPK 将镜像锁定到多架构索引摘要。
-- 自动升级工作流不会升级 NAS 上已经安装的应用。检查更新后请在 fnOS 手动安装新 FPK。
-- FPK 更新保留配置、API 密钥、订阅和启动标记；安装脚本只在新安装时生成初始文件。
-- 卸载时请在 fnOS 保留仍需使用的应用数据。
-- `configs/.autostart` 会启用上游 S6 的 Mihomo 核心和启动后处理服务；请保留此文件以便容器重启后提供桌面 Web 面板。
+## 自动打包发布
 
-## 自动打包
+GitHub Actions 每 6 小时检查 ShellCrash 和 Mihomo 的最新正式版。检测到新的版本组合后，会下载并校验官方 Mihomo x86_64/ARM64 二进制，固定 MetaCubeXD 面板提交，交叉编译管理器，构建两种架构的 FPK，再运行真实 Mihomo、管理页和 fnOS 身份网关的本机冒烟测试。成功后发布 FPK、SHA256SUMS、上游版本和构建来源信息。
 
-GitHub Actions 每 6 小时检查 ShellCrash 最新正式 GitHub Release，并查找对应的官方 Docker Hub 稳定标签（如 ShellCrash 1.9.4 对应 juewuy/shellcrash:1.9.4release）。
+自动发布只跟进上游当前稳定版，不会升级 NAS 上已安装的应用；请在 fnOS 手动安装新 FPK。GitHub 仓库只需默认的 `GITHUB_TOKEN`。也可从 Actions 手动指定 ShellCrash/Mihomo tag 和 package revision。
 
-工作流会分别验证 ShellCrash 与 Nginx 网关的 amd64 和 ARM64 镜像、锁定镜像摘要、用官方 fnpack 构建 FPK，并在 Linux amd64 runner 启动两个容器检查网关登录身份校验、服务端 API 密钥注入、自动连接脚本和 Dashboard 静态资源路径，再发布 FPK、SHA256SUMS 和 upstream.json。如果上游镜像还没发布或检查失败，当前 Release 不会被替换，后续调度会再试。
+## 本地构建和检查
 
-只需仓库内置的 GITHUB_TOKEN，不需要个人 PAT。定时工作流仅在默认分支运行；GitHub 可能延迟执行，长期无活动的公开仓库也可能暂停定时任务。它只跟进最新正式版，不回补定时检查间错过的历史版本。
+需要 Python 3、Go（`manager/go.mod` 指定版本）和 Linux amd64 的官方 `fnpack`。运行时不要求 Docker。
 
-可在 Actions 手动指定 upstream_tag 和 package_revision 重打包。不要覆盖已经发布的相同版本；如需重打包同一个上游版本，请增加修订号。
+```sh
+python3 scripts/check.py
+(cd manager && go test -race ./... && go vet ./...)
+python3 scripts/release.py build \
+  --tag 1.9.4 \
+  --mihomo-tag v1.19.31 \
+  --version 1.9.4-3 \
+  --fnpack /absolute/path/to/fnpack
+bash scripts/smoke.sh .build/package/x86
+```
 
-## 本地构建
+FPK 和校验文件生成在 `dist/`，按架构准备的目录在 `.build/package/x86/` 和 `.build/package/arm/`。冒烟测试会启动真实 Mihomo 与静态面板；CI runner 不要求创建 TUN 设备，整机路由和真实公网请求在 fnOS NAS 上单独验证。
 
-准备 Python 3、Docker CLI + buildx，以及[官方 fnpack](https://developer.fnnas.com/docs/cli/fnpack/)：
+## 上游
 
-    python3 scripts/check.py
-    python3 scripts/release.py build \
-      --tag 1.9.4 \
-      --image-tag 1.9.4release \
-      --version 1.9.4.2 \
-      --fnpack /absolute/path/to/fnpack
-
-FPK 和校验文件生成在 dist/，构建目录在 .build/package/。运行完整 Web 面板冒烟检查还需要 Docker daemon：
-
-    SHELLCRASH_IMAGE=juewuy/shellcrash@sha256:<官方多架构摘要> \
-      GATEWAY_IMAGE=nginx@sha256:<官方多架构摘要> bash scripts/smoke.sh
-
-## 上游链接
-
-- [ShellCrash 稳定版 Releases](https://github.com/juewuy/ShellCrash/releases)
-- [ShellCrash 官方 Docker 部署说明](https://github.com/juewuy/ShellCrash/blob/dev/docker/README.md)
-- [ShellCrash 上游许可证](https://github.com/juewuy/ShellCrash/blob/1.9.4/LICENSE.txt)
-- [飞牛 Docker 应用开发文档](https://developer.fnnas.com/docs/examples/docker/)
-- [飞牛 fnpack 文档](https://developer.fnnas.com/docs/cli/fnpack/)
+- [ShellCrash Releases](https://github.com/juewuy/ShellCrash/releases)
+- [Mihomo Releases](https://github.com/MetaCubeX/mihomo/releases)
+- [MetaCubeXD 面板](https://github.com/MetaCubeX/metacubexd)
+- [飞牛官方 fnpack 文档](https://developer.fnnas.com/docs/cli/fnpack/)

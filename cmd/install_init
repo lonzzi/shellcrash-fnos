@@ -2,7 +2,7 @@
 set -eu
 umask 077
 
-mkdir -p "$TRIM_PKGETC" "$TRIM_PKGVAR/ShellCrash/configs" "$TRIM_PKGVAR/ShellCrash/yamls" "$TRIM_PKGVAR/ShellCrash/jsons"
+mkdir -p "$TRIM_PKGETC" "$TRIM_PKGVAR/ShellCrash/configs" "$TRIM_PKGVAR/ShellCrash/yamls" "$TRIM_PKGVAR/ShellCrash/jsons" "$TRIM_PKGVAR/ShellCrash/providers"
 
 # Only seed a fresh installation. The app data and token are never replaced
 # when fnOS reruns an install hook while updating an existing package.
@@ -29,7 +29,7 @@ if [ ! -s "$TRIM_PKGVAR/ShellCrash/configs/ShellCrash.cfg" ]; then
     cat > "$tmp" <<EOF
 # ShellCrash fnOS defaults. Edit with care.
 secret=$secret
-mix_port=7890
+mix_port=17890
 db_port=9999
 firewall_area=4
 redir_mod=纯净模式
@@ -41,30 +41,19 @@ EOF
     mv "$tmp" "$TRIM_PKGVAR/ShellCrash/configs/ShellCrash.cfg"
 fi
 
-# The upstream Docker image reads this file from its S6 shellcrash service.
-# The official init hook normally creates it, but the fnOS package mounts the
-# config directory over the image's copy, so seed the container paths here.
-if [ ! -s "$TRIM_PKGVAR/ShellCrash/configs/command.env" ]; then
-    tmp=$(mktemp "$TRIM_PKGVAR/ShellCrash/configs/command.env.XXXXXX")
-    trap 'rm -f "$tmp"' EXIT
-    cat > "$tmp" <<'EOF'
-TMPDIR='/tmp/ShellCrash'
-BINDIR='/etc/ShellCrash'
-COMMAND='"/tmp/ShellCrash/CrashCore" -d "/etc/ShellCrash" -f "/tmp/ShellCrash/config.yaml"'
-EOF
-    chmod 600 "$tmp"
-    mv "$tmp" "$TRIM_PKGVAR/ShellCrash/configs/command.env"
-fi
-
 if [ ! -s "$TRIM_PKGVAR/ShellCrash/yamls/config.yaml" ]; then
+    secret=$(cat "$TRIM_PKGETC/api.secret")
     tmp=$(mktemp "$TRIM_PKGVAR/ShellCrash/yamls/config.yaml.XXXXXX")
     trap 'rm -f "$tmp"' EXIT
-    cat > "$tmp" <<'EOF'
+cat > "$tmp" <<EOF
 # Starter config only. Import your own subscription/config before proxy use.
-mixed-port: 7890
+mixed-port: 17890
 allow-lan: true
+bind-address: "*"
 mode: rule
 log-level: info
+external-controller: 127.0.0.1:9999
+secret: $secret
 proxies: []
 proxy-groups:
   - name: Proxy
@@ -78,9 +67,9 @@ EOF
     mv "$tmp" "$TRIM_PKGVAR/ShellCrash/yamls/config.yaml"
 fi
 
-# Compose mounts this marker into the upstream S6 user runlevel to enable the
-# core and its after-start service on container startup. Keep it persistent.
 if [ "$fresh_install" = true ]; then
     touch "$TRIM_PKGVAR/ShellCrash/configs/.autostart"
 fi
-chmod 700 "$TRIM_PKGVAR/ShellCrash/configs" "$TRIM_PKGVAR/ShellCrash/yamls" "$TRIM_PKGVAR/ShellCrash/jsons"
+mkdir -p "$TRIM_PKGVAR/ShellCrash/runtime"
+chmod 700 "$TRIM_PKGVAR/ShellCrash/configs" "$TRIM_PKGVAR/ShellCrash/yamls" "$TRIM_PKGVAR/ShellCrash/jsons" "$TRIM_PKGVAR/ShellCrash/providers"
+chmod 700 "$TRIM_PKGVAR/ShellCrash/runtime"

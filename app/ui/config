@@ -7,7 +7,7 @@
       "protocol": "",
       "gatewayPrefix": "/app/shellcrash-fnos",
       "gatewaySocket": "app.sock",
-      "url": "/app/shellcrash-fnos/ui/#/setup",
+      "url": "/app/shellcrash-fnos/manager/",
       "allUsers": false,
       "control": {
         "accessPerm": "readonly"

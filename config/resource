@@ -1,10 +1,16 @@
 {
-  "docker-project": {
-    "projects": [
+  "port-config": {
+    "protocol-file": "ShellCrash.sc"
+  },
+  "data-share": {
+    "shares": [
       {
-        "name": "shellcrash-fnos",
-        "path": "docker"
+        "name": "ShellCrash",
+        "permission": {
+          "rw": ["shellcrash-fnos"]
+        }
       }
     ]
-  }
+  },
+  "systemd-unit": {}
 }

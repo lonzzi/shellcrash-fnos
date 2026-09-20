@@ -3,8 +3,8 @@
     "stepTitle": "ShellCrash 初始设置",
     "items": [
       {
-        "type": "tips",
-        "helpText": "安装后从桌面图标在 fnOS 小窗口打开 Web 面板。首次启动会生成一个空白 Mihomo 配置，供面板正常启动；请导入自己的配置后再使用代理。API 密钥保存在 /vol1/@appconf/shellcrash-fnos/api.secret。默认面板端口 19120，HTTP/SOCKS 混合代理端口 17890。默认只提供容器内代理，不修改 fnOS 宿主机防火墙。"
+      "type": "tips",
+      "helpText": "安装后从桌面图标在 fnOS 小窗口打开订阅管理。应用以原生进程运行，不需要 Docker；默认混合代理端口为 17890。启用 TUN 后会在 fnOS 宿主机网络空间设置自动路由和 nftables/iptables 规则，接管 NAS 本机出站流量，并可覆盖转发的 TCP 流量。局域网私有地址保留直连，不会自动代理其他局域网客户端。升级会在权限为 600 的归档中备份现有配置、订阅、provider 缓存和 API 密钥。"
       }
     ]
   }

@@ -1,3 +1,6 @@
 #!/bin/bash
 # fnOS owns data cleanup choices. Leave ShellCrash data intact by default.
+if [ -x "${TRIM_APPDEST:-}/cmd/main" ]; then
+    "${TRIM_APPDEST}/cmd/main" stop || true
+fi
 exit 0
