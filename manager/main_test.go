@@ -185,6 +185,11 @@ func TestDecodeOverlayBuildsHostTUNRoutesAndKeepsLocalNetworksExcluded(t *testin
 			t.Fatalf("host TUN route exclusions lost %s", required)
 		}
 	}
+	for _, unsupported := range []string{"240.0.0.0/4", "ff00::/8"} {
+		if sequenceHasString(mappingValue(tun, "route-exclude-address"), unsupported) {
+			t.Fatalf("host TUN includes nftables max-range CIDR %s", unsupported)
+		}
+	}
 	for _, required := range []string{"any:53", "tcp://any:53"} {
 		if !sequenceHasString(mappingValue(tun, "dns-hijack"), required) {
 			t.Fatalf("host DNS hijack is missing %s", required)

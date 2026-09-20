@@ -1006,6 +1006,8 @@ func normalizeTunStack(root *yaml.Node) bool {
 			changed = true
 		}
 	}
+	// Avoid ranges ending at the address-family maximum: sing-tun's nftables
+	// auto-redirect interval builder currently fails those ranges with EEXIST.
 	changed = appendStringDefaults(tun, "route-exclude-address", []string{
 		"0.0.0.0/8",
 		"10.0.0.0/8",
@@ -1015,11 +1017,9 @@ func normalizeTunStack(root *yaml.Node) bool {
 		"172.16.0.0/12",
 		"192.168.0.0/16",
 		"224.0.0.0/4",
-		"240.0.0.0/4",
 		"::1/128",
 		"fc00::/7",
 		"fe80::/10",
-		"ff00::/8",
 	}) || changed
 	if strings.EqualFold(scalarValue(mappingValue(mappingValue(root, "dns"), "enable")), "true") {
 		changed = appendStringDefaults(tun, "dns-hijack", []string{"any:53", "tcp://any:53"}) || changed
