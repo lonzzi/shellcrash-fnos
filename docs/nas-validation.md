@@ -2,6 +2,18 @@
 
 The current package is a native fnOS host service: the root manager starts the official Mihomo binary, serves a bundled MetaCubeXD dashboard, and exposes the desktop app through an admin-gated Unix-socket gateway. The package source is checked in GitHub Actions. Its smoke test starts the native Core and manager on a Linux runner with TUN disabled, then checks the API, UI, identity gate, and static dashboard assets. A separate live fnOS test is required to validate host-wide routing and must be recorded below before calling TUN verified.
 
+## Native revision 1.9.4-5: host-wide TUN live test (2026-09-20)
+
+The FPK was upgraded through the fnOS Web App Center's manual package flow. The installed native service reports `1.9.4-5` and `running`; `docker container ls --filter name=shellcrash-fnos` returns no ShellCrash containers.
+
+- The manager status endpoint reports `coreConnected=true`, `tunActive=true`, `tunMode=on`, `dnsMode=on`, `lastError=null`, and 2 configured providers.
+- The host `Meta` interface has the `UP` flag. `ip route get 8.8.8.8` selects `dev Meta table 2022`; the route to the NAS LAN gateway remains on `end0`.
+- The host has the `inet mihomo` nftables table with `output` and `prerouting` chains. A `curl` with proxy environment variables cleared and `--noproxy '*'` to Google's HTTPS `/generate_204` endpoint returned HTTP 204 with TLS verification successful. The resolved destination also selected `Meta` in the host route lookup.
+- The pre-upgrade and post-upgrade configuration comparison matched the API secret, persistent profile, DNS/TUN overlay, subscription settings, provider file, and ShellCrash settings. The status still reports 2 providers. The comparison emitted only match booleans; no secret or subscription URL was printed.
+- The profile's saved proxy groups and YAML were not rewritten. TUN route excludes are generated in the runtime overlay; the fix removes only `240.0.0.0/4` and `ff00::/8`, retaining the local/private/LAN exclusions. These two address-family maximum ranges triggered an nftables `EEXIST` error in the bundled TUN redirect path; the failure and upstream fix are documented in [sing-box issue #4316](https://github.com/SagerNet/sing-box/issues/4316) and [sing-tun PR #83](https://github.com/SagerNet/sing-tun/pull/83).
+
+This verifies that the fnOS **host** route is using Mihomo's TUN interface, rather than a TUN interface confined to a container. Mihomo's `auto-route` and Linux `auto-redirect` behavior is described in the [official TUN documentation](https://wiki.metacubex.one/en/config/inbound/tun/). Subscription rules still determine whether an individual request exits through a proxy node or uses `DIRECT`.
+
 Historical container-based revisions `1.9.4-5` and `1.9.4-6` used Docker, S6, and an Nginx gateway. Their tests below describe those old packages and are not evidence that the native FPK upgrade or host TUN works.
 
 The old container smoke check verified:
