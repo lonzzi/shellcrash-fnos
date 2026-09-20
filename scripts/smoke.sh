@@ -134,6 +134,7 @@ echo "Admin MetaCubeXD dashboard returned HTTP $code"
 test "$code" = 200
 grep -Fq 'const base="/app/shellcrash-fnos"' "$tmp/dashboard.html"
 grep -Fq "q.set('secondaryPath',base)" "$tmp/dashboard.html"
+grep -Fq "q.set('secret','fnos-gateway')" "$tmp/dashboard.html"
 grep -Fq 'shellcrash-fnos-back' "$tmp/dashboard.html"
 if grep -Fq "$secret" "$tmp/dashboard.html"; then
   echo "Dashboard HTML leaked the API secret" >&2

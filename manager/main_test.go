@@ -277,6 +277,14 @@ func TestGatewayRequiresAdminAndRoutesCoreWithSecret(t *testing.T) {
 			http.Error(w, "missing injected secret", http.StatusUnauthorized)
 			return
 		}
+		if r.URL.Path == "/connections" {
+			if r.URL.Query().Get("token") != secret {
+				http.Error(w, "missing injected websocket token", http.StatusUnauthorized)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if r.URL.Path != "/version" {
 			http.Error(w, "unexpected upstream path", http.StatusNotFound)
 			return
@@ -333,6 +341,12 @@ func TestGatewayRequiresAdminAndRoutesCoreWithSecret(t *testing.T) {
 	if !strings.Contains(response.Body.String(), "shellcrash-fnos-back") || !strings.Contains(response.Body.String(), "base+'/manager/'") {
 		t.Fatalf("advanced dashboard did not receive the in-window return link: %s", response.Body.String())
 	}
+	if !strings.Contains(response.Body.String(), "q.set('secret','fnos-gateway')") {
+		t.Fatal("advanced dashboard did not receive the non-secret auto-login placeholder")
+	}
+	if strings.Contains(response.Body.String(), secret) {
+		t.Fatal("advanced dashboard HTML exposed the real Mihomo API secret")
+	}
 	request = httptest.NewRequest(http.MethodGet, "/app/shellcrash-fnos/ui/_nuxt/entry.js", nil)
 	request.Header.Set("X-Trim-Userid", "admin")
 	request.Header.Set("X-Trim-Isadmin", "true")
@@ -348,6 +362,14 @@ func TestGatewayRequiresAdminAndRoutesCoreWithSecret(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"version":"test"`) {
 		t.Fatalf("admin Core API proxy status = %d, body = %s", response.Code, response.Body.String())
+	}
+	request = httptest.NewRequest(http.MethodGet, "/app/shellcrash-fnos/connections?token=fnos-gateway", nil)
+	request.Header.Set("X-Trim-Userid", "admin")
+	request.Header.Set("X-Trim-Isadmin", "true")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("dashboard WebSocket token proxy status = %d, want 204: %s", response.Code, response.Body.String())
 	}
 	request = httptest.NewRequest(http.MethodGet, "/app/shellcrash-fnos/manager/api/status", nil)
 	request.Header.Set("X-Trim-Userid", "admin")

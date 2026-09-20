@@ -22,7 +22,7 @@
 - HTTP/SOCKS 混合代理监听 NAS 的 TCP/UDP `17890`，可供局域网设备显式使用。
 - Mihomo 控制器只绑定 `127.0.0.1:9999`，管理器只绑定 `127.0.0.1:9998`，不额外暴露管理端口。
 - `17890` 流量端口按 fnOS 应用端口配置开放；不要把它直接暴露给不可信网络。
-- 桌面小窗使用 fnOS 管理员登录态；API 密钥保存在应用配置目录，权限为 `600`，不会写进页面或 URL。
+- 桌面小窗使用 fnOS 管理员登录态；API 密钥保存在应用配置目录，权限为 `600`，不会下发到浏览器。高级 MetaCubeXD 面板通过 fnOS 网关自动连接，不再要求手动输入密钥。前端只使用无权限的连接占位值，网关会替换 REST 和 WebSocket 认证；未登录或非管理员仍无法访问。
 - 高级 MetaCubeXD 面板随 FPK 离线安装。右下角的“返回 ShellCrash 订阅管理”可以回到管理页，关闭 fnOS 窗口可返回桌面。
 
 状态页会显示 Core API 是否连接、TUN 接口是否处于 UP 状态和混合代理端口。可从 NAS 终端用不带代理环境变量的请求做整机 TUN 测试，例如 `env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY curl -I --max-time 20 https://www.google.com`。再从高级面板的 Connections 检查这条请求实际命中的规则、代理链和流量。空闲时实时流量为 0 是正常现象。
@@ -45,7 +45,7 @@ python3 scripts/check.py
 python3 scripts/release.py build \
   --tag 1.9.4 \
   --mihomo-tag v1.19.31 \
-  --version 1.9.4-5 \
+  --version 1.9.4-7 \
   --fnpack /absolute/path/to/fnpack
 bash scripts/smoke.sh .build/package/x86
 ```

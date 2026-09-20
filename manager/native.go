@@ -348,7 +348,13 @@ func (a *manager) gatewayHandler() http.Handler {
 		request.URL.Scheme = coreURL.Scheme
 		request.URL.Host = coreURL.Host
 		request.Host = coreURL.Host
-		request.Header.Set("Authorization", "Bearer "+a.apiSecret())
+		secret := a.apiSecret()
+		request.Header.Set("Authorization", "Bearer "+secret)
+		if _, ok := request.URL.Query()["token"]; ok {
+			query := request.URL.Query()
+			query.Set("token", secret)
+			request.URL.RawQuery = query.Encode()
+		}
 		request.Header.Set("Accept-Encoding", "identity")
 	}
 
@@ -444,6 +450,6 @@ func (a *manager) apiSecret() string {
 
 func (a *manager) dashboardInjection() string {
 	prefix, _ := json.Marshal(strings.TrimRight(a.appPrefix, "/"))
-	script := `<script>(()=>{const base=__APP_PREFIX__,u=new URL(location.href),q=u.searchParams;if(!q.has('hostname')){q.set('hostname',location.hostname);q.set('port',location.port||(location.protocol==='https:'?'443':'80'));q.delete('http');q.delete('https');q.set(location.protocol==='https:'?'https':'http','1');q.set('secondaryPath',base);q.set('label','ShellCrash (fnOS)');location.replace(u.toString());return}const addBack=()=>{if(!document.body||document.getElementById('shellcrash-fnos-back'))return;const a=document.createElement('a');a.id='shellcrash-fnos-back';a.href=base+'/manager/';a.textContent='← 返回 ShellCrash 订阅管理';a.setAttribute('aria-label','返回 ShellCrash 订阅管理');a.style.cssText='position:fixed;right:18px;bottom:18px;z-index:2147483647;display:inline-block;border-radius:999px;padding:10px 15px;background:#146ef5;color:white;text-decoration:none;font:600 13px/1.2 -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.2)';document.body.appendChild(a)};if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',addBack,{once:true});else addBack()})()</script></head>`
+	script := `<script>(()=>{const base=__APP_PREFIX__,u=new URL(location.href),q=u.searchParams;if(!q.has('hostname')){q.set('hostname',location.hostname);q.set('port',location.port||(location.protocol==='https:'?'443':'80'));q.delete('http');q.delete('https');q.set(location.protocol==='https:'?'https':'http','1');q.set('secondaryPath',base);q.set('label','ShellCrash (fnOS)');q.set('secret','fnos-gateway');location.replace(u.toString());return}if(q.get('secret')!=='fnos-gateway'){q.set('secret','fnos-gateway');location.replace(u.toString());return}const addBack=()=>{if(!document.body||document.getElementById('shellcrash-fnos-back'))return;const a=document.createElement('a');a.id='shellcrash-fnos-back';a.href=base+'/manager/';a.textContent='← 返回 ShellCrash 订阅管理';a.setAttribute('aria-label','返回 ShellCrash 订阅管理');a.style.cssText='position:fixed;right:18px;bottom:18px;z-index:2147483647;display:inline-block;border-radius:999px;padding:10px 15px;background:#146ef5;color:white;text-decoration:none;font:600 13px/1.2 -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.2)';document.body.appendChild(a)};if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',addBack,{once:true});else addBack()})()</script></head>`
 	return strings.Replace(script, "__APP_PREFIX__", string(prefix), 1)
 }
