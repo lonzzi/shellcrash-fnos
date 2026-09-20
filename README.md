@@ -45,7 +45,7 @@ python3 scripts/check.py
 python3 scripts/release.py build \
   --tag 1.9.4 \
   --mihomo-tag v1.19.31 \
-  --version 1.9.4-7 \
+  --version 1.9.4-8 \
   --fnpack /absolute/path/to/fnpack
 bash scripts/smoke.sh .build/package/x86
 ```

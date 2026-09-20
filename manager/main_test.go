@@ -341,8 +341,11 @@ func TestGatewayRequiresAdminAndRoutesCoreWithSecret(t *testing.T) {
 	if !strings.Contains(response.Body.String(), "shellcrash-fnos-back") || !strings.Contains(response.Body.String(), "base+'/manager/'") {
 		t.Fatalf("advanced dashboard did not receive the in-window return link: %s", response.Body.String())
 	}
-	if !strings.Contains(response.Body.String(), "q.set('secret','fnos-gateway')") {
-		t.Fatal("advanced dashboard did not receive the non-secret auto-login placeholder")
+	if !strings.Contains(response.Body.String(), "config.defaultBackendURL=window.location.origin+base") {
+		t.Fatal("advanced dashboard did not receive the local fnOS-gateway default URL")
+	}
+	if strings.Contains(response.Body.String(), "q.set('secret'") {
+		t.Fatal("advanced dashboard must not rely on query-based secret auto-login")
 	}
 	if strings.Contains(response.Body.String(), secret) {
 		t.Fatal("advanced dashboard HTML exposed the real Mihomo API secret")
